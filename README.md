@@ -5,13 +5,19 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.2.2-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.3-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.3 更新
+
+- 搜索候选现在一并带出发行年份、流派与音轨号（来源有则返回），新增「年份 / 元数据」面板：点选候选才填入，不覆盖已填内容，也不会自动写回文件。
+- 年份为空且常规搜索没有可信年份时，可手动点击「补全年份」按需查询备用来源：先查同平台备用端点，再查 Deezer / MusicBrainz；结果标注来源与匹配度，仍须手动点选。断网或全部来源超时时不触发；本首尚未执行常规搜索时会先补跑常规搜索。
+- 补充上述备用来源的外部接口披露与合规记录。
 
 ## v0.2.2 更新
 

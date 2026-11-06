@@ -32,7 +32,7 @@ const MAX_RESULTS: usize = 8;
 const MB_INTERVAL: Duration = Duration::from_secs(1);
 /// MusicBrainz 要求描述性 User-Agent（官方 Rate Limiting 条款）。
 const MB_USER_AGENT: &str =
-    "MusicTag/0.2.2 ( https://github.com/zsxink/MusicTag ; metadata year lookup )";
+    "MusicTag/0.2.3 ( https://github.com/zsxink/MusicTag ; metadata year lookup )";
 
 /// 版本后缀清洗词表（查询串与候选标题同样处理，对称清洗不引入偏差）。
 const VERSION_TAGS: &[&str] = &[

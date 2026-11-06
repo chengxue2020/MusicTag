@@ -53,3 +53,23 @@ The v0.2.2 tag MUST use the existing tag-triggered workflow and produce a succes
 - **WHEN** the merged v0.2.2 commit is tagged and the release workflow completes
 - **THEN** the public Release is published, contains Windows, macOS arm64, macOS x64, and Linux build assets, and the triggered Homebrew tap synchronization succeeds
 
+### Requirement: Release v0.2.3 version metadata is consistent
+The application package metadata and README version badge MUST identify the release as `0.2.3`.
+
+#### Scenario: Inspect v0.2.3 release version
+- **WHEN** a maintainer inspects the Tauri, Cargo, npm, and README version declarations for this release
+- **THEN** each declaration reports `0.2.3`
+
+### Requirement: v0.2.3 release notes summarize metadata candidate features
+The README MUST summarize user-visible changes introduced since v0.2.2 without claiming capabilities beyond the shipped behavior.
+
+#### Scenario: Read v0.2.3 release notes
+- **WHEN** a user reads the v0.2.3 release notes
+- **THEN** they can identify that search candidates now carry year, genre and track metadata applied only on explicit selection, and that a manual year fallback lookup is available when the regular search yields no plausible year, with wording consistent with the shipped application
+
+### Requirement: v0.2.3 Release build is verified after merge
+The v0.2.3 tag MUST use the existing tag-triggered workflow and produce a successful public Release containing Windows, macOS arm64, macOS x64, and Linux build assets after required CI passes.
+
+#### Scenario: Verify v0.2.3 tag-triggered release
+- **WHEN** the merged v0.2.3 commit is tagged and the release workflow completes
+- **THEN** the public Release is published and contains Windows, macOS arm64, macOS x64, and Linux build assets
