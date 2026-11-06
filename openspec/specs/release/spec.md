@@ -73,3 +73,24 @@ The v0.2.3 tag MUST use the existing tag-triggered workflow and produce a succes
 #### Scenario: Verify v0.2.3 tag-triggered release
 - **WHEN** the merged v0.2.3 commit is tagged and the release workflow completes
 - **THEN** the public Release is published and contains Windows, macOS arm64, macOS x64, and Linux build assets
+
+### Requirement: Release v0.2.4 version metadata is consistent
+The application package metadata and README version badge MUST identify the release as `0.2.4`.
+
+#### Scenario: Inspect v0.2.4 release version
+- **WHEN** a maintainer inspects the Tauri, Cargo, npm, and README version declarations for this release
+- **THEN** each declaration reports `0.2.4`
+
+### Requirement: v0.2.4 release notes summarize the missing-year filter
+The README MUST summarize user-visible changes introduced since v0.2.3 without claiming capabilities beyond the shipped behavior.
+
+#### Scenario: Read v0.2.4 release notes
+- **WHEN** a user reads the v0.2.4 release notes
+- **THEN** they can identify that the missing-field filter gained a year dimension with a "缺年份" badge and that its year detection matches the editor read side without writing to audio files, with wording consistent with the shipped application
+
+### Requirement: v0.2.4 Release build is verified after merge
+The v0.2.4 tag MUST use the existing tag-triggered workflow and produce a successful public Release containing Windows, macOS arm64, macOS x64, and Linux build assets after required CI passes.
+
+#### Scenario: Verify v0.2.4 tag-triggered release
+- **WHEN** the merged v0.2.4 commit is tagged and the release workflow completes
+- **THEN** the public Release is published and contains Windows, macOS arm64, macOS x64, and Linux build assets

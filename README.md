@@ -5,13 +5,18 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.2.3-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.4-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.4 更新
+
+- 「筛选缺失」新增「年份」维度：面板默认全选六个维度，可单独取消；缺少发行年份的歌曲会命中筛选并显示「缺年份」标记。
+- 年份缺失判定与编辑表单读侧完全一致（兼容 FLAC `DATE`、MP3 `TDRC`、Vorbis `YEAR` 以及 WAV 的 RIFF INFO 年份），避免「表单里有年份、筛选却报缺」。扫描仍为只读，不改写音频文件。
 
 ## v0.2.3 更新
 
