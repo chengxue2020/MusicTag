@@ -7,7 +7,10 @@ mod common;
 use app_lib::commands::missing::scan_missing as scan_missing_command;
 use app_lib::model::{MissingField, MissingScanResult};
 use app_lib::service::missing::scan_missing;
-use common::{add_tags, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use app_lib::service::reader::read_song_meta;
+use common::{
+    add_tags, tiny_png_bytes, write_riff_info_only_wav, write_tagged_flac, write_tagged_mp3,
+};
 use lofty::config::WriteOptions;
 use lofty::prelude::{TagExt, TaggedFileExt};
 use lofty::tag::{items::ENGLISH, ItemKey, ItemValue, TagItem};
@@ -20,7 +23,9 @@ fn scan(dir: &TempDir, checks: &[MissingField]) -> MissingScanResult {
 
 #[test]
 fn missing_field_contract_has_fixed_wire_names_and_order() {
+    // 调用方乱序 + 新维度 year：wire name 固定，业务输出仍按 FIELD_ORDER。
     let checks = vec![
+        MissingField::Year,
         MissingField::Lyrics,
         MissingField::Cover,
         MissingField::Album,
@@ -28,7 +33,10 @@ fn missing_field_contract_has_fixed_wire_names_and_order() {
         MissingField::Title,
     ];
     let json = serde_json::to_string(&checks).unwrap();
-    assert_eq!(json, r#"["lyrics","cover","album","artist","title"]"#);
+    assert_eq!(
+        json,
+        r#"["year","lyrics","cover","album","artist","title"]"#
+    );
 
     let tmp = TempDir::new().unwrap();
     write_tagged_flac(tmp.path(), "ordered.flac", "  ", "Artist");
@@ -39,7 +47,8 @@ fn missing_field_contract_has_fixed_wire_names_and_order() {
             MissingField::Title,
             MissingField::Album,
             MissingField::Cover,
-            MissingField::Lyrics
+            MissingField::Lyrics,
+            MissingField::Year,
         ]
     );
 }
@@ -52,8 +61,10 @@ fn duplicate_checks_are_deduplicated_in_fixed_business_order() {
     let result = scan(
         &tmp,
         &[
+            MissingField::Year,
             MissingField::Lyrics,
             MissingField::Title,
+            MissingField::Year,
             MissingField::Lyrics,
             MissingField::Cover,
             MissingField::Album,
@@ -67,12 +78,13 @@ fn duplicate_checks_are_deduplicated_in_fixed_business_order() {
             MissingField::Album,
             MissingField::Cover,
             MissingField::Lyrics,
+            MissingField::Year,
         ]
     );
 }
 
 #[test]
-fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
+fn scans_all_six_dimensions_with_or_semantics() {
     let tmp = TempDir::new().unwrap();
     write_tagged_flac(tmp.path(), "missing.flac", "  ", "Artist");
     write_tagged_flac(tmp.path(), "complete.flac", "Title", "Artist");
@@ -90,6 +102,7 @@ fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
             MissingField::Title,
             MissingField::Artist,
             MissingField::Album,
+            MissingField::Year,
         ],
     );
     assert_eq!(result.errors, Vec::new());
@@ -104,7 +117,8 @@ fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
             MissingField::Title,
             MissingField::Album,
             MissingField::Cover,
-            MissingField::Lyrics
+            MissingField::Lyrics,
+            MissingField::Year,
         ]
     );
     assert!(
@@ -112,7 +126,7 @@ fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
             .songs
             .iter()
             .all(|song| !song.path.ends_with("complete.flac")),
-        "完整歌曲不应命中"
+        "add_tags 写入 RecordingDate=2021 的完整歌曲不应命中缺年份"
     );
 
     let only_artist = scan(&tmp, &[MissingField::Artist]);
@@ -197,6 +211,90 @@ fn text_dimensions_treat_each_trimmed_blank_value_as_missing() {
                 || song.path.ends_with("blank-album.flac"))
     }));
     assert_eq!(album_result.songs.len(), 3);
+}
+
+#[test]
+fn year_dimension_uses_the_same_keys_as_read_song_meta() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "no-year.flac", "Title", "Artist");
+
+    // RecordingDate（FLAC `DATE` / MP3 `TDRC`）：add_tags 写入 2021。
+    write_tagged_flac(tmp.path(), "recording-date.flac", "Title", "Artist");
+    let recording_date_path = tmp.path().join("recording-date.flac");
+    add_tags(&recording_date_path, None, None);
+
+    // ItemKey::Year（Vorbis `YEAR`）是 reader 的兜底 key，筛选必须同样认它。
+    write_tagged_flac(tmp.path(), "vorbis-year.flac", "Title", "Artist");
+    let vorbis_year_path = tmp.path().join("vorbis-year.flac");
+    let mut file = lofty::read_from_path(&vorbis_year_path).unwrap();
+    let tag = file.primary_tag_mut().unwrap();
+    tag.insert_text(ItemKey::Year, "1998".to_string());
+    tag.save_to_path(&vorbis_year_path, WriteOptions::default())
+        .unwrap();
+
+    // 早检：读侧确实能看到这两个年份，避免筛选断言建立在无效 fixture 上。
+    assert_eq!(
+        read_song_meta(&recording_date_path).unwrap().year,
+        "2021"
+    );
+    assert_eq!(read_song_meta(&vorbis_year_path).unwrap().year, "1998");
+
+    let result = scan(&tmp, &[MissingField::Year]);
+    assert_eq!(result.errors, Vec::new());
+    assert_eq!(result.songs.len(), 1, "有年份的两首不得误报为缺年份");
+    assert!(result.songs[0].path.ends_with("no-year.flac"));
+    assert_eq!(result.songs[0].missing, vec![MissingField::Year]);
+}
+
+#[test]
+fn blank_year_is_missing_after_trim_and_scan_stays_read_only() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("blank-year.flac");
+    write_tagged_flac(tmp.path(), "blank-year.flac", "Title", "Artist");
+    let mut file = lofty::read_from_path(&path).unwrap();
+    let tag = file.primary_tag_mut().unwrap();
+    tag.insert_text(ItemKey::RecordingDate, "  ".to_string());
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+    let bytes_before_scan = fs::read(&path).unwrap();
+
+    let result = scan(&tmp, &[MissingField::Year]);
+
+    assert_eq!(result.errors, Vec::new());
+    assert_eq!(result.songs.len(), 1);
+    assert_eq!(result.songs[0].missing, vec![MissingField::Year]);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        bytes_before_scan,
+        "查漏扫描不得写回标签"
+    );
+}
+
+#[test]
+fn wav_riff_info_year_is_not_reported_missing() {
+    let tmp = TempDir::new().unwrap();
+    write_riff_info_only_wav(
+        tmp.path(),
+        "riff-year.wav",
+        &[("INAM", "Title"), ("IART", "Artist"), ("ICRD", "2021")],
+    );
+    write_riff_info_only_wav(
+        tmp.path(),
+        "riff-no-year.wav",
+        &[("INAM", "Title"), ("IART", "Artist")],
+    );
+    assert_eq!(
+        read_song_meta(&tmp.path().join("riff-year.wav"))
+            .unwrap()
+            .year,
+        "2021"
+    );
+
+    // read_song_meta 对 WAV 会回退 RIFF INFO；查漏必须同口径，否则表单有年份却报缺。
+    let result = scan(&tmp, &[MissingField::Year]);
+    assert_eq!(result.errors, Vec::new());
+    assert_eq!(result.songs.len(), 1);
+    assert!(result.songs[0].path.ends_with("riff-no-year.wav"));
+    assert_eq!(result.songs[0].missing, vec![MissingField::Year]);
 }
 
 #[test]

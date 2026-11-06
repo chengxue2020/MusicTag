@@ -34,6 +34,7 @@ const missingLabels: Record<MissingField, string> = {
   album: '专辑',
   cover: '封面',
   lyrics: '歌词',
+  year: '年份',
 }
 
 function isMissingChecked(field: MissingField): boolean {

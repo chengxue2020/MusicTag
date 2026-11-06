@@ -26,7 +26,8 @@ pub struct FolderChanged {
 /// 缺失字段筛选维度（missing-fields-filter）。
 ///
 /// 序列化字面量是前端 IPC 契约的一部分；业务检查顺序由 service 层固定为
-/// `title → artist → album → cover → lyrics`，不取决于调用方传入顺序。
+/// `title → artist → album → cover → lyrics → year`（`year` 追加在末尾，既有
+/// 五维的顺序/索引不变），不取决于调用方传入顺序。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MissingField {
@@ -36,6 +37,7 @@ pub enum MissingField {
     #[serde(rename = "cover")]
     Cover,
     Lyrics,
+    Year,
 }
 
 /// 单首歌曲的缺失字段结果。只返回路径和维度，不携带完整 Song、封面或歌词正文。

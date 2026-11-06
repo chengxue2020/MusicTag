@@ -41,6 +41,7 @@ import {
   clearCover,
   initLastDir,
   manualSearch,
+  MISSING_FIELDS,
   open,
   pickCoverCandidate,
   pickLyricCandidate,
@@ -94,14 +95,14 @@ describe('songStore — 缺失筛选状态与扫描竞态', () => {
     songStore.folderPath = '/music'
     songStore.songs = [s('/music/a.flac', 'A', 'AA'), s('/music/b.flac', 'B', 'BB')]
     songStore.missingFilterEnabled = false
-    songStore.missingChecks = ['title', 'artist', 'album', 'cover', 'lyrics']
+    songStore.missingChecks = [...MISSING_FIELDS]
     songStore.missingByPath = {}
     songStore.missingScanErrors = []
     songStore.missingScanState = 'idle'
     songStore.missingScanError = ''
   })
 
-  it('打开筛选默认五维并扫描，结果按 path 建立缺失映射', async () => {
+  it('打开筛选默认六维（含年份）并扫描，结果按 path 建立缺失映射', async () => {
     const result: MissingScanResult = {
       songs: [{ path: '/music/b.flac', missing: ['cover', 'title'] }],
       errors: [{ path: '/music/a.flac', reason: '读取失败' }],
@@ -111,8 +112,9 @@ describe('songStore — 缺失筛选状态与扫描竞态', () => {
     await openMissingFilter(scan)
 
     expect(songStore.missingFilterEnabled).toBe(true)
-    expect(songStore.missingChecks).toEqual(['title', 'artist', 'album', 'cover', 'lyrics'])
-    expect(scan).toHaveBeenCalledWith('/music', ['title', 'artist', 'album', 'cover', 'lyrics'])
+    expect(songStore.missingChecks).toEqual(['title', 'artist', 'album', 'cover', 'lyrics', 'year'])
+    expect(songStore.missingChecks).toContain('year')
+    expect(scan).toHaveBeenCalledWith('/music', ['title', 'artist', 'album', 'cover', 'lyrics', 'year'])
     expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['cover', 'title'] })
     expect(songStore.missingScanErrors).toEqual(result.errors)
     expect(songStore.missingScanState).toBe('done')

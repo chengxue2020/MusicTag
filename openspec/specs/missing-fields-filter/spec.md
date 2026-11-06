@@ -7,21 +7,21 @@
 
 ### Requirement: 缺失维度选择
 
-筛选面板 SHALL 提供五个复选框：歌名（`title`）、歌手（`artist`）、专辑（`album`）、封面（`pictures`）和歌词。面板默认全选；全不勾选 SHALL 视为未启用缺失筛选并显示完整歌曲列表。
+筛选面板 SHALL 提供六个复选框：歌名（`title`）、歌手（`artist`）、专辑（`album`）、封面（`pictures`）、歌词和年份（`year`）。业务检查顺序固定为 `title → artist → album → cover → lyrics → year`，`year` 追加在末尾以保持既有五维顺序不变。面板默认全选；全不勾选 SHALL 视为未启用缺失筛选并显示完整歌曲列表。
 
 #### Scenario: 默认全选
 
 - **WHEN** 用户打开一个文件夹并首次打开缺失筛选面板
-- **THEN** 五个维度均为选中状态，列表显示缺少任一维度的歌曲
+- **THEN** 六个维度均为选中状态（含年份），列表显示缺少任一维度的歌曲
 
 #### Scenario: 全不勾选
 
-- **WHEN** 用户取消全部五个维度
+- **WHEN** 用户取消全部六个维度
 - **THEN** 缺失筛选关闭，列表恢复完整歌曲列表
 
 ### Requirement: 缺失判定与 OR 语义
 
-歌曲 SHALL 在所选维度中至少一个维度缺失时命中。歌名、歌手、专辑在 `trim()` 后为空时视为缺失；封面在 `tag.pictures()` 为空时视为缺失。
+歌曲 SHALL 在所选维度中至少一个维度缺失时命中。歌名、歌手、专辑、年份在 `trim()` 后为空时视为缺失；封面在 `tag.pictures()` 为空时视为缺失。年份 SHALL 复用编辑表单的年份读侧唯一出口（`RecordingDate` 优先、`Year` 兜底；WAV 再回退 RIFF INFO 的同组 key），不得另写一套 item key，避免出现「表单里有年份、筛选却报缺」。
 
 #### Scenario: 文本字段缺失
 
@@ -32,6 +32,16 @@
 
 - **WHEN** 歌曲没有内嵌图片（`tag.pictures()` 为空），且封面维度被选中
 - **THEN** 歌曲命中筛选
+
+#### Scenario: 年份缺失
+
+- **WHEN** 歌曲主标签的 `RecordingDate`/`Year` 均不存在或为空白，且年份维度被选中
+- **THEN** 歌曲命中筛选并显示「缺年份」badge
+
+#### Scenario: 年份存在（含 WAV RIFF INFO 回退）
+
+- **WHEN** 歌曲主标签带非空 `RecordingDate`（FLAC `DATE` / MP3 `TDRC`）或 `Year`（Vorbis `YEAR`），或 WAV 仅 RIFF INFO 带 `ICRD` 年份
+- **THEN** 编辑表单能读到该年份，且该歌曲不判定为缺年份
 
 #### Scenario: 多选取并集
 
@@ -87,8 +97,8 @@
 
 #### Scenario: 缺失 badge
 
-- **WHEN** 一首歌曲缺少歌名和封面
-- **THEN** 列表行显示「缺歌名」和「缺封面」等具体 badge
+- **WHEN** 一首歌曲缺少歌名、封面和年份
+- **THEN** 列表行显示「缺歌名」「缺封面」「缺年份」等具体 badge，顺序与业务固定顺序一致
 
 #### Scenario: 无命中空态
 

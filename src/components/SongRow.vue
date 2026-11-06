@@ -21,9 +21,10 @@ const missingLabels: Record<MissingField, string> = {
   album: '缺专辑',
   cover: '缺封面',
   lyrics: '缺歌词',
+  year: '缺年份',
 }
 const missingBadges = computed(() =>
-  (['title', 'artist', 'album', 'cover', 'lyrics'] as MissingField[])
+  (['title', 'artist', 'album', 'cover', 'lyrics', 'year'] as MissingField[])
     .filter((field) => props.missing?.includes(field))
     .map((field) => missingLabels[field]),
 )

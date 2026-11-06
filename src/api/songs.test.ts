@@ -147,6 +147,20 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
     })
   })
 
+  it('scanMissing：年份维度 year 原样透传 scan_missing', async () => {
+    const result: MissingScanResult = {
+      songs: [{ path: '/music/a.flac', missing: ['year'] }],
+      errors: [],
+    }
+    mockInvoke.mockResolvedValue(result)
+
+    await expect(scanMissing('/music', ['year'])).resolves.toEqual(result)
+    expect(mockInvoke).toHaveBeenCalledWith('scan_missing', {
+      dir: '/music',
+      checks: ['year'],
+    })
+  })
+
   it('pickCoverSavePath：透传 pick_cover_save_path + { songPath }；取消返回 null（不是错误）', async () => {
     mockInvoke.mockResolvedValue('/music/告白气球.jpg')
     await expect(pickCoverSavePath('/a/song.flac')).resolves.toBe('/music/告白气球.jpg')

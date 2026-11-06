@@ -386,7 +386,7 @@ enum SearchError {
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
 >   - 封面导出（只读）：`pick_cover_save_path(song_path) -> Result<Option<String>, String>`（rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → `Ok(None)`，不写任何文件）、`export_cover(song_path, dest_path) -> Result<(), String>`（把标签内第一个 front cover 的原始字节写到目标路径，无 UI）；前端跨 IPC 只传源路径与目标路径，不传图片字节
 >   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）、`search_metadata_fallback(title, artist, album) -> Vec<MetadataCandidate>`（FR-8 #18：用户手动点「补全年份」才发起的分级兜底查询，带来源标签与匹配度；离线不触发）
->   - 查漏：`scan_missing(dir, checks) -> MissingScanResult`（按需只读扫描歌名/歌手/专辑/封面/歌词缺失；仅返回路径和缺失维度，不批量编辑、不写盘）
+>   - 查漏：`scan_missing(dir, checks) -> MissingScanResult`（按需只读扫描歌名/歌手/专辑/封面/歌词/**年份**六个维度缺失；年份判定复用表单年份读侧的 `RecordingDate` → `Year` 键序与 WAV RIFF INFO 回退，避免「表单有年份、筛选报缺」；仅返回路径和缺失维度，不批量编辑、不写盘）
 >   - 更新：`check_for_update() -> Result<UpdateCheckResult, String>`（当前/最新稳定版本、更新标记及 Release 页面地址）、`open_release_page(url) -> Result<(), String>`（用户主动操作，固定仓库 HTTPS Release URL 校验后打开）、`get_last_update_check_at(now) -> Option<String>`、`save_last_update_check_at(value) -> Result<(), String>`、`sync_menu_state(snapshot) -> Result<(), String>`
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。
 > - **「无第三方依赖」说明**：指**无 JS 引擎**（不用 PyExecJS 类跑加密）；Rust 侧加密算法自实现，仅引入 `aes`/`cbc`/`rsa`/`rand` 等 crate。

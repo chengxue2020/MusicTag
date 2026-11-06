@@ -8,8 +8,9 @@ export type MusicSourceId = 'netease' | 'qqmusic' | 'kugou' | 'lrclib' | 'itunes
 /** 歌词来源：内嵌 / 同名单曲 lrc / 无 */
 export type LyricsSource = 'embedded' | 'sidecar' | 'none'
 
-/** 查漏扫描维度（与 Rust MissingField 的 snake_case serde 名称一致）。 */
-export type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics'
+/** 查漏扫描维度（与 Rust MissingField 的 snake_case serde 名称一致）。
+ *  业务顺序固定 title → artist → album → cover → lyrics → year；year 追加在末尾。 */
+export type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics' | 'year'
 
 export interface MissingSong {
   path: string

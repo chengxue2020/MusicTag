@@ -119,4 +119,19 @@ describe('SongRow — select 走 dirty 拦截门（spec: 无修改直接切 / �
       '缺歌词',
     ])
   })
+
+  it('缺年份显示「缺年份」badge，且排在既有五维之后', () => {
+    const w = mount(SongRow, {
+      props: {
+        song: makeSummary('/a/one.flac'),
+        missing: ['year', 'title', 'cover'],
+      },
+    })
+
+    expect(w.findAll('.missing-badge').map((x) => x.text())).toEqual([
+      '缺歌名',
+      '缺封面',
+      '缺年份',
+    ])
+  })
 })

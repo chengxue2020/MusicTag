@@ -19,7 +19,7 @@ enableAutoUnmount(afterEach)
 beforeEach(() => stopFolderWatching())
 
 import type { Song } from '../api/types'
-import { songStore, stopFolderWatching } from '../store/song'
+import { MISSING_FIELDS, songStore, stopFolderWatching } from '../store/song'
 import SongList from './SongList.vue'
 import AppBar from './AppBar.vue'
 
@@ -226,7 +226,7 @@ describe('SongList — 缺失筛选面板', () => {
     ]
     songStore.searchQuery = ''
     songStore.missingFilterEnabled = false
-    songStore.missingChecks = ['title', 'artist', 'album', 'cover', 'lyrics']
+    songStore.missingChecks = [...MISSING_FIELDS]
     songStore.missingByPath = {}
     songStore.missingScanErrors = []
     songStore.missingScanState = 'idle'
@@ -257,12 +257,54 @@ describe('SongList — 缺失筛选面板', () => {
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
 
-    expect(w.findAll('input[type="checkbox"]').length).toBe(5)
+    expect(w.findAll('input[type="checkbox"]').length).toBe(6)
     expect(w.findAll('input[type="checkbox"]').every((x) => (x.element as HTMLInputElement).checked)).toBe(true)
+    expect(w.text()).toContain('年份')
     expect(w.findAll('.song-row').length).toBe(1)
     expect(w.text()).toContain('缺歌名')
     expect(w.text()).toContain('缺封面')
     expect(w.text()).toContain('1 首歌曲读取失败')
+  })
+
+  it('年份维度：可单独取消第六项，命中结果显示「缺年份」badge', async () => {
+    const sentChecks: string[][] = []
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
+      if (cmd === 'get_last_dir') return null
+      if (cmd === 'scan_missing') {
+        const checks = (args as { checks: string[] }).checks
+        sentChecks.push([...checks])
+        if (checks.includes('year')) {
+          return { songs: [{ path: '/music/b.flac', missing: ['year'] }], errors: [] }
+        }
+        return { songs: [{ path: '/music/b.flac', missing: ['cover'] }], errors: [] }
+      }
+      if (cmd === 'list_songs') return songStore.songs
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+    await w.get('button.missing-filter-btn').trigger('click')
+    await flushPromises()
+
+    expect(sentChecks[0]).toContain('year')
+    expect(w.text()).toContain('年份')
+    expect(w.text()).toContain('缺年份')
+    expect(w.findAll('.song-row').length).toBe(1)
+
+    // 第六个复选框（索引 5）是年份；取消后不再向后端发送 year，也不再显示缺年份。
+    const checks = w.findAll('input[type="checkbox"]')
+    expect(checks.length).toBe(6)
+    await checks[5].setValue(false)
+    await flushPromises()
+
+    expect(sentChecks[sentChecks.length - 1]).not.toContain('year')
+    expect(songStore.missingChecks).not.toContain('year')
+    expect(songStore.missingChecks).toHaveLength(5)
+    expect(w.text()).not.toContain('缺年份')
+    expect(w.text()).toContain('缺封面')
+    expect(w.findAll('.song-row').length).toBe(1)
   })
 
   it('扫描完成无命中显示专用空态，关闭后恢复完整列表', async () => {
@@ -363,7 +405,7 @@ describe('SongList — 缺失筛选面板', () => {
     expect(w.text()).toContain('缺歌词')
   })
 
-  it('逐项取消五个维度后恢复完整列表并停止筛选', async () => {
+  it('逐项取消六个维度后恢复完整列表并停止筛选', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null

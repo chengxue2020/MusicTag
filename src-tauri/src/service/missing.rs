@@ -2,22 +2,28 @@
 //
 // 这里仅读取选中的标签维度、图片存在性和歌词来源存在性；不调用 reader 的完整
 // Song 读取，不编码封面，也不读取/写入 sidecar 内容。
+//
+// 例外：年份维度复用 reader::tagged_file_year 这一「年份读侧唯一出口」，
+// 保证筛选判定与编辑表单读到的年份是同一组 key、同一套 WAV 回退规则。
 
 use crate::model::{MissingField, MissingScanError, MissingScanResult, MissingSong};
 use crate::service::lyrics::sidecar_lrc_path;
 use crate::service::meta::is_audio_file;
+use crate::service::reader;
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, ItemValue};
 use std::path::Path;
 use walkdir::WalkDir;
 
-const FIELD_ORDER: [MissingField; 5] = [
+/// 业务检查顺序固定；`Year` 追加在末尾，既有五维的顺序/索引保持不变。
+const FIELD_ORDER: [MissingField; 6] = [
     MissingField::Title,
     MissingField::Artist,
     MissingField::Album,
     MissingField::Cover,
     MissingField::Lyrics,
+    MissingField::Year,
 ];
 
 /// 扫描目录中选定维度缺失的音频文件。
@@ -93,6 +99,9 @@ fn scan_file(path: &Path, selected: &[MissingField]) -> Result<Option<MissingSon
             MissingField::Album => text_missing(tag, ItemKey::AlbumTitle),
             MissingField::Cover => tag.map(|tag| tag.pictures().is_empty()).unwrap_or(true),
             MissingField::Lyrics => lyrics_missing(tag, path),
+            // 年份必须走 reader 的同一出口：`RecordingDate` 优先、`Year` 兜底，
+            // WAV 再回退 RIFF INFO。空白串按其他文本维度一样 trim 后视为缺失。
+            MissingField::Year => reader::tagged_file_year(&tagged_file).trim().is_empty(),
         };
         if is_missing {
             missing.push(*field);

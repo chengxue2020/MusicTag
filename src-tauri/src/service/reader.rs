@@ -11,8 +11,7 @@ use crate::service::cover::encode_cover;
 use crate::service::meta::split_track_pair;
 use lofty::ape::ApeFile;
 use lofty::config::ParseOptions;
-use lofty::file::AudioFile;
-use lofty::file::FileType;
+use lofty::file::{AudioFile, FileType, TaggedFile};
 use lofty::picture::{Picture, PictureType};
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
@@ -88,6 +87,19 @@ fn wav_year_value(primary: Option<&Tag>, riff_info: Option<&Tag>) -> String {
     String::new()
 }
 
+/// 年份读侧唯一出口：从 `TaggedFile` 按同一组 key 取值（primary 的
+/// `RecordingDate` → `Year`；WAV 再回退 RIFF INFO 的同组 key）。
+///
+/// `pub(crate)`：查漏扫描（`service::missing`）判定「缺年份」必须复用本函数，
+/// 否则会出现「表单里明明有年份、筛选却说缺」的判定漂移。
+pub(crate) fn tagged_file_year(tagged_file: &TaggedFile) -> String {
+    let primary = tagged_file.primary_tag();
+    let riff_info = (tagged_file.file_type() == FileType::Wav)
+        .then(|| tagged_file.tag(TagType::RiffInfo))
+        .flatten();
+    wav_year_value(primary, riff_info)
+}
+
 /// 读取单文件 title/artist。任何读取失败均返回空串，使列表层保持健壮。
 pub fn read_summary(path: &Path) -> SongSummary {
     let (title, artist) = match Probe::open(path).and_then(|probed| probed.read()) {
@@ -155,8 +167,9 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
     // 年份读取需同时兼容两个 ItemKey（design.md D2 只写 `ItemKey::Year`，但 lofty
     // 实际映射：Vorbis `DATE` → RecordingDate、ID3v2 `TDRC` → RecordingDate；仅
     // Vorbis `YEAR` 落 `ItemKey::Year`）。故 RecordingDate 优先、Year 兜底，保证
-    // FLAC `DATE=...` 与 MP3 `TDRC=...` 均能读到。
-    let year = wav_year_value(tag, riff_info);
+    // FLAC `DATE=...` 与 MP3 `TDRC=...` 均能读到。查漏扫描共用 `tagged_file_year`
+    // 这一唯一出口，保证两边 key 序与 WAV RIFF INFO 回退完全一致。
+    let year = tagged_file_year(&tagged_file);
 
     let (cover, cover_mime) = first_embedded_picture(path, tag)
         .map(encode_cover)
