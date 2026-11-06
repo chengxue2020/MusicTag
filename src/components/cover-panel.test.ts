@@ -28,6 +28,8 @@ vi.mock('../api/search', () => ({
   searchSongs: mockSearchSongs,
   fetchLyric: vi.fn(async () => null),
   downloadCover: mockDownloadCover,
+  searchSource: vi.fn(async () => []),
+  searchMetadataFallback: vi.fn(async () => []),
 }))
 vi.mock('../lib/cover', () => ({
   bytesToCoverInput: mockBytesToCoverInput,

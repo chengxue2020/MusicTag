@@ -10,6 +10,7 @@ import { listSongs as defaultListSongs, listenFolderChanged as defaultListenFold
 
 import { downloadCover as defaultDownloadCover } from '../api/search'
 import { fetchLyric as defaultFetchLyric } from '../api/search'
+import { searchMetadataFallback as defaultMetadataFallback } from '../api/search'
 import { searchSongs as defaultSearchSongs } from '../api/search'
 import { searchSource as defaultSearchSource } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
@@ -20,6 +21,7 @@ import type {
   CoverInput,
   FolderChanged,
   LyricsSource,
+  MetadataCandidate,
   MissingField,
   MissingScanError,
   MissingScanResult,
@@ -58,6 +60,26 @@ type SearchState = 'idle' | 'searching' | 'done'
 export type MissingScanState = 'idle' | 'scanning' | 'done' | 'error'
 
 export const MISSING_FIELDS: MissingField[] = ['title', 'artist', 'album', 'cover', 'lyrics']
+
+/** 候选是否带有任一可填的文本元数据（FR-8 #16）。 */
+function hasMetadata(c: SongCandidate): boolean {
+  return Boolean(c.year || c.genre || c.track || c.track_total)
+}
+
+/** 年份是否可信（1900 ~ 次年）——与 Rust `dates::plausible` 同口径，脏年份不阻断兜底按钮。 */
+function isPlausibleYear(value: string | null | undefined): boolean {
+  if (value === null || value === undefined) return false
+  const y = Number(value.trim())
+  return Number.isInteger(y) && y >= 1900 && y <= new Date().getUTCFullYear() + 1
+}
+
+/** 可填入的元数据字段（A 的 SongCandidate 与 B 的 MetadataCandidate 都可传）。 */
+export interface MetadataFieldValues {
+  year?: string | null
+  genre?: string | null
+  track?: string | null
+  track_total?: string | null
+}
 
 function normalizeMissingChecks(checks: MissingField[]): MissingField[] {
   return MISSING_FIELDS.filter((field) => checks.includes(field))
@@ -152,6 +174,23 @@ interface SongEditor {
   lyricSearchSeq: number
   /** 封面搜索序号（同上，独立于歌词）。 */
   coverSearchSeq: number
+  /** A：常规五源候选里带文本元数据的子集（FR-8 #16；不新增请求）。 */
+  metadataCandidates: SongCandidate[]
+  /** B：手动「补全年份」返回的分级兜底候选（FR-8 #18；切歌即弃、不落盘）。 */
+  yearFallbackCandidates: MetadataCandidate[]
+  /** 兜底搜索态（idle/searching/done，独立于歌词/封面两套状态机）。 */
+  metadataSearchState: SearchState
+  /** 兜底搜索过期序号（切歌作废在途请求，同 D2.6）。 */
+  metadataSearchSeq: number
+  /** **本次**常规搜索是否 `all_failed`（FR-8 #17）：判据是本次结果，不是「是否曾离线」。
+   *  三态，避免把「本首压根没跑过常规搜索」误当成「常规搜索成功」：
+   *  - `null`：本首尚未执行常规搜索（歌词/封面齐全 → 选中即搜跳过；或刚切歌）；
+   *    此时不直接触发 B，点「补全年份」会**先补跑 A**，A 成功且无可信年份才进 B。
+   *  - `false`：常规搜索已执行且至少一源成功（#17 ②）→ 允许 B；
+   *  - `true`：五源全失败 / IPC 失败（#17 ③）→ 不触发 B、不发请求。 */
+  lastSearchAllFailed: boolean | null
+  /** 派生：是否显示「补全年份」按钮（#17 ② 或「A 未跑、点后先补跑 A」+ 年份为空 + 非只读）。 */
+  needYearFallback: boolean
 }
 
 /**
@@ -570,6 +609,20 @@ const raw = reactive<SongEditor>({
   get renamePending() {
     return this.pendingRename !== null
   },
+  /** 派生：「补全年份」可用性（FR-8 #17/#18）。三种状态：
+   *  ① A 已带出可信年份 → 不触发 B；② 本次常规搜索成功但候选无可信年份 → 才允许 B；
+   *  ③ 本次常规搜索 all_failed=true（离线）→ 不触发、不发请求。
+   *  另：`lastSearchAllFailed === null`（本首未跑 A）时按钮仍显示，但点击后由 `runFallback`
+   *  先补跑常规五源；只有 A 成功且无可信年份才真正发起 B，故不违背 #17 ②。
+   *  判据是 `lastSearchAllFailed`（本次结果），**不是**会话级 `isOffline`（是否曾离线）。 */
+  get needYearFallback() {
+    const cur = this.current
+    if (cur === null || this.readonly) return false
+    if (cur.year.trim() !== '') return false
+    if (this.lastSearchAllFailed === true) return false
+    if (this.metadataCandidates.some((c) => isPlausibleYear(c.year))) return false
+    return true
+  },
   readonly: false,
   lyricsSource: 'none',
   exportLrc: false,
@@ -588,6 +641,11 @@ const raw = reactive<SongEditor>({
   lyricFetchEmpty: false,
   lyricSearchSeq: 0,
   coverSearchSeq: 0,
+  metadataCandidates: [],
+  yearFallbackCandidates: [],
+  metadataSearchState: 'idle',
+  metadataSearchSeq: 0,
+  lastSearchAllFailed: null,
 })
 
 function resetMissingFilterState(): void {
@@ -737,6 +795,13 @@ function resetSearchState(): void {
   raw.lyricFetchEmpty = false
   raw.lyricSearchSeq++
   raw.coverSearchSeq++
+  // FR-8 #14/#18：A/B 元数据候选生命周期同样是「当前歌曲」，切歌即弃、不落盘；
+  // 序号自增作废在途兜底请求；lastSearchAllFailed 归 null（本次尚未跑过常规搜索）。
+  raw.metadataCandidates = []
+  raw.yearFallbackCandidates = []
+  raw.metadataSearchState = 'idle'
+  raw.metadataSearchSeq++
+  raw.lastSearchAllFailed = null
 }
 
 /**
@@ -776,6 +841,10 @@ export async function autoSearchOnSelect(
     const lyricValid = lyricSeq !== null && raw.lyricSearchSeq === lyricSeq
     const coverValid = coverSeq !== null && raw.coverSearchSeq === coverSeq
     if (!lyricValid && !coverValid) return
+    // FR-8 #16/#17：同一次常规五源响应顺便喂元数据候选（零新增请求），并记录
+    // 本次 all_failed 作为 B 级联网关——离线判据是「本次」而非「是否曾离线」。
+    raw.lastSearchAllFailed = result.all_failed
+    raw.metadataCandidates = result.songs.filter(hasMetadata)
     if (lyricValid) {
       raw.lyricCandidates = result.songs
       raw.lyricSearchState = 'done'
@@ -795,6 +864,8 @@ export async function autoSearchOnSelect(
     const coverValid = coverSeq !== null && raw.coverSearchSeq === coverSeq
     if (!lyricValid && !coverValid) return
     raw.isOffline = true // IPC reject 按全源失败同样标记（防御）
+    raw.lastSearchAllFailed = true
+    raw.metadataCandidates = []
     if (lyricValid) raw.lyricSearchState = 'idle'
     if (coverValid) raw.coverSearchState = 'idle'
   }
@@ -823,6 +894,10 @@ export async function manualSearch(
   try {
     const result = await searchSongs(cur.title, cur.artist, cur.album) // album 综合进查询
     if (kind === 'lyrics' ? raw.lyricSearchSeq !== mySeq : raw.coverSearchSeq !== mySeq) return
+    // 手动搜索也是一次常规五源搜索：同样刷新 A 候选与本次 all_failed 判据
+    // （手动成功可将「曾离线」的会话重新放行兜底，FR-8 #17 判据是本次结果）。
+    raw.lastSearchAllFailed = result.all_failed
+    raw.metadataCandidates = result.songs.filter(hasMetadata)
     if (kind === 'lyrics') {
       raw.lyricCandidates = result.songs
       raw.lyricSearchState = 'done'
@@ -832,6 +907,9 @@ export async function manualSearch(
     }
   } catch {
     if (kind === 'lyrics' ? raw.lyricSearchSeq !== mySeq : raw.coverSearchSeq !== mySeq) return
+    // 命令级失败 → 本次常规搜索不可用，兜底按钮暂隐（不标会话离线，沿用 D3）。
+    raw.lastSearchAllFailed = true
+    raw.metadataCandidates = []
     if (kind === 'lyrics') {
       raw.lyricCandidates = []
       raw.lyricSearchState = 'done'
@@ -839,6 +917,80 @@ export async function manualSearch(
       raw.coverCandidates = []
       raw.coverSearchState = 'done'
     }
+  }
+}
+
+/**
+ * 点选元数据候选（FR-3 #8 / FR-8 #16）：仅把候选里**非空**的值填入 `current` 中
+ * **当前为空**的同名字段。不覆盖用户已填内容、不自动写盘、不自动继承字段间的值；
+ * 候选文本原样填入（繁简折叠只用于匹配比较）。覆盖的字段都在 DIRTY_FIELDS
+ * 内，故 dirty 自动翻转。A（SongCandidate）与 B（MetadataCandidate）共用此动作。
+ */
+export function applyMetadataCandidate(cand: MetadataFieldValues): void {
+  if (raw.readonly || raw.current === null) return
+  const cur = raw.current
+  if (!cur.year.trim() && cand.year) cur.year = cand.year
+  if (!cur.genre.trim() && cand.genre) cur.genre = cand.genre
+  if (!cur.track.trim() && cand.track) cur.track = cand.track
+  if (!cur.track_total.trim() && cand.track_total) cur.track_total = cand.track_total
+}
+
+/**
+ * 手动「补全年份」→ A 打底 + 分级兜底 B（FR-8 #17/#18/#19）。
+ *
+ * 守卫（与 `needYearFallback` 派生一致，双保险）：readonly / 无歌 / 年份已填 /
+ * 本次常规搜索 `all_failed=true`（离线）/ 已有在途兜底请求 → 不发请求。
+ *
+ * `lastSearchAllFailed === null`（本首歌词/封面齐全，选中即搜跳过、A 未跑）时，
+ * **先补跑一次常规五源搜索 A**：A 全失败（③）或已带出可信年份（①）都不进 B，
+ * 只有 A 成功且无可信年份（②）才调用 `search_metadata_fallback`——严格守住 #17 ②，
+ * 同时不让「歌词/封面齐全但缺年份」的歌完全拿不到补全入口。
+ *
+ * 后台异步、不阻塞编辑；`metadataSearchSeq` 作废切歌后的过期结果；失败降级为空态，
+ * **不标会话离线**（手动兜底失败不影响常规搜索状态）；候选不落盘、切歌即弃。
+ * IPC 依赖以 `searchFallback` / `searchSongs` 注入（默认 `api/search.ts`，测试可注入桩）。
+ */
+export async function runFallback(
+  searchFallback: (title: string, artist: string, album: string) => Promise<MetadataCandidate[]> = defaultMetadataFallback,
+  searchSongs: (title: string, artist: string, album: string) => Promise<SearchResult> = defaultSearchSongs,
+): Promise<void> {
+  const cur = raw.current
+  if (cur === null || raw.readonly) return
+  if (cur.year.trim() !== '') return
+  if (raw.lastSearchAllFailed === true) return // 离线 / 全源失败 → 不触发、不发请求
+  if (raw.metadataSearchState === 'searching') return // 防连点并发
+  const mySeq = ++raw.metadataSearchSeq
+  raw.metadataSearchState = 'searching'
+  raw.yearFallbackCandidates = []
+
+  // A 未跑 → 先补跑常规五源（不新增来源，只是本首没跑过的那一次）。
+  if (raw.lastSearchAllFailed === null) {
+    let result: SearchResult
+    try {
+      result = await searchSongs(cur.title, cur.artist, cur.album)
+    } catch {
+      if (raw.metadataSearchSeq !== mySeq) return
+      raw.metadataSearchState = 'idle' // A 失败：不进 B，按钮保留可重试
+      return
+    }
+    if (raw.metadataSearchSeq !== mySeq) return // 已切歌 / 被新请求作废
+    raw.lastSearchAllFailed = result.all_failed
+    raw.metadataCandidates = result.songs.filter(hasMetadata)
+    if (result.all_failed || raw.metadataCandidates.some((c) => isPlausibleYear(c.year))) {
+      raw.metadataSearchState = 'idle' // ③ 显示离线提示 / ① 展示 A 候选，均不发 B
+      return
+    }
+  }
+
+  try {
+    const list = await searchFallback(cur.title, cur.artist, cur.album)
+    if (raw.metadataSearchSeq !== mySeq) return // 已切歌 / 被新请求作废
+    raw.yearFallbackCandidates = list
+    raw.metadataSearchState = 'done'
+  } catch {
+    if (raw.metadataSearchSeq !== mySeq) return
+    raw.yearFallbackCandidates = []
+    raw.metadataSearchState = 'done'
   }
 }
 

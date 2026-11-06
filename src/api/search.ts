@@ -4,7 +4,7 @@
 // download_cover。实现 = `invokeCommand` 透传（同 songs.ts 模式），候选生命周期
 // （选中即搜、切歌即弃、离线、C2、静默忽略）逻辑在 store/song.ts，不在 api 层。
 import { invokeCommand } from './client'
-import type { MusicSourceId, SearchResult, SongCandidate } from './types'
+import type { MetadataCandidate, MusicSourceId, SearchResult, SongCandidate } from './types'
 
 /** 五源并发搜索（标题 + 作者 + 专辑 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。
  *  album（search-cover-album）：综合进各源查询关键词与打分；空 → 回退 title(+artist) 现行为。 */
@@ -30,4 +30,14 @@ export function fetchLyric(source: MusicSourceId, id: string): Promise<string | 
 /** 点选封面候选下载缩略图（`String → Vec<u8>`；返回裸 bytes，mime 嗅探/压缩/转 data URL 在前端 lib/cover.ts）。 */
 export function downloadCover(url: string): Promise<number[]> {
   return invokeCommand<number[]>('download_cover', { url })
+}
+
+/** 分级兜底年份查询（FR-8 #18）：仅由「补全年份」按钮手动触发，离线 / 全源失败不调用。
+ *  一级同平台备用端点优先，无可信结果才跑二级（Deezer / MusicBrainz），命中即停。 */
+export function searchMetadataFallback(
+  title: string,
+  artist: string,
+  album: string,
+): Promise<MetadataCandidate[]> {
+  return invokeCommand<MetadataCandidate[]>('search_metadata_fallback', { title, artist, album })
 }

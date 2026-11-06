@@ -98,6 +98,11 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
             artist: it["artistName"].as_str().unwrap_or_default().to_string(),
             album: it["albumName"].as_str().unwrap_or_default().to_string(),
             cover_url: None,
+            // FR-8 #16：LRCLIB 只提供歌词元数据，无发行日期 → 全部保持 null。
+            year: None,
+            genre: None,
+            track: None,
+            track_total: None,
         })
         .collect()
 }

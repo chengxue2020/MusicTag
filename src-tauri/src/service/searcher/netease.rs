@@ -13,7 +13,7 @@
 // 独立 crate，仅 `pub` 可见）。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{crypto, join_query_terms, MusicSource};
+use crate::service::searcher::{crypto, dates, join_query_terms, MusicSource};
 use async_trait::async_trait;
 use rand::Rng;
 
@@ -161,6 +161,10 @@ pub fn is_error_response(json: &serde_json::Value) -> bool {
 /// picUrl 为 http，Tauri WKWebView 安全上下文渲染 http 图片被混合内容拦截，封面候选破图隐藏、
 /// 表现为「搜索不出封面」（Issue #113）；`p*.music.126.net` 同主机 https 可用，替换安全。
 /// 空字段兜底为空串 / None（Rust 不 trim）。
+///
+/// FR-8 #16：`al.publishTime`（部分响应为 `album.publishTime`）是**毫秒级** Unix
+/// 时间戳 → `year`。**`publishTime = 0` 是缺失值，必须跳过**——批量年份脚本曾因此
+/// 把 84 首歌误标成 1970；`dates::year_from_unix_millis` 内部已对该值直接返回 `None`。
 pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
     let songs = match json["result"]["songs"].as_array() {
         Some(a) => a,
@@ -185,6 +189,13 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
             cover_url: s["al"]["picUrl"]
                 .as_str()
                 .map(|u| u.replace("http://", "https://")),
+            year: s["al"]["publishTime"]
+                .as_i64()
+                .or_else(|| s["album"]["publishTime"].as_i64())
+                .and_then(dates::year_from_unix_millis),
+            genre: None,
+            track: None,
+            track_total: None,
         })
         .collect()
 }

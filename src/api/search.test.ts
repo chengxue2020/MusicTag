@@ -8,8 +8,8 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import type { SearchResult, SongCandidate } from './types'
-import { downloadCover, fetchLyric, searchSongs, searchSource } from './search'
+import type { MetadataCandidate, SearchResult, SongCandidate } from './types'
+import { downloadCover, fetchLyric, searchMetadataFallback, searchSongs, searchSource } from './search'
 
 const searchResult: SearchResult = {
   songs: [
@@ -91,5 +91,19 @@ describe('api/search.ts — 类型化 command 封装（命令名/参数逐字对
   it('downloadCover：下载失败（reject）→ 中文原因透传', async () => {
     mockInvoke.mockRejectedValue(new Error('封面下载超时'))
     await expect(downloadCover('https://x/bad.jpg')).rejects.toThrow('封面下载超时')
+  })
+
+  it('searchMetadataFallback：透传 search_metadata_fallback + { title, artist, album }，返回带来源/匹配度的年份候选', async () => {
+    const candidates: MetadataCandidate[] = [
+      {
+        year: '2003', title: '歌名', artist: '作者', album: '专辑',
+        source: 'QQ 单曲详情', score: 1.2,
+      },
+    ]
+    mockInvoke.mockResolvedValue(candidates)
+    await expect(searchMetadataFallback('歌名', '作者', '专辑')).resolves.toEqual(candidates)
+    expect(mockInvoke).toHaveBeenCalledWith('search_metadata_fallback', {
+      title: '歌名', artist: '作者', album: '专辑',
+    })
   })
 })

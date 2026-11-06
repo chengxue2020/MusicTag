@@ -126,10 +126,14 @@ pub enum MusicSourceId {
     Itunes,
 }
 
-/// 搜索候选（design.md §10.3 契约，v1-search-backend）。
+/// 搜索候选（design.md §10.3 契约，v1-search-backend / FR-8 #16）。
 ///
-/// 惰性拉取：候选只带 `id` + `cover_url`（随三家搜索响应带出），歌词文本 / 封面字节
-/// 点选后才 `fetch_lyric` / `download_cover`。无 `year` 字段（§10.3 TS 未定义）。
+/// 惰性拉取：歌词文本 / 封面字节点选后才 `fetch_lyric` / `download_cover`；
+/// 轻量文本元数据则随**既有搜索响应**（不新增请求、不新增来源）一并带出。
+/// 四个可选字段各源「有则解析、无则 null」：QQ `pubtime`、网易云 `album.publishTime`、
+/// iTunes `releaseDate`/`primaryGenreName`/`trackNumber`/`trackCount`；无可靠日期的
+/// 源（LRCLIB、酷狗）保持 `None`。`#[serde(default)]` 让旧 JSON 夹具 / 旧前端载荷
+/// 反序列化时按 `None` 兜底，不破坏既有契约。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongCandidate {
     pub source: MusicSourceId,
@@ -138,6 +142,29 @@ pub struct SongCandidate {
     pub artist: String,
     pub album: String,
     pub cover_url: Option<String>,
+    #[serde(default)]
+    pub year: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub track: Option<String>,
+    #[serde(default)]
+    pub track_total: Option<String>,
+}
+
+/// 分级兜底查询候选（FR-8 #18/#19，design.md §10.3）。
+///
+/// `source` 是展示用自由文本标签（'QQ 单曲详情' / 'iTunes JP' / 'Deezer' …），
+/// **不进 `MusicSourceId` 枚举**，故不影响来源序 / `source_stats` / `all_failed` 语义。
+/// `score` 为匹配度；候选只在内存里流转，不落盘、不自动写盘，用户点选后才填入表单。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetadataCandidate {
+    pub year: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub source: String,
+    pub score: f32,
 }
 
 /// 五源并发搜索结果（design.md §10.3 契约，v1-search-backend / v1-search-fixes / search-sources-renewal）。

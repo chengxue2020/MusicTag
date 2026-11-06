@@ -31,6 +31,11 @@ fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandi
         artist: artist.to_string(),
         album: String::new(),
         cover_url: None,
+        // FR-8 #16：旧夹具不带元数据，维持 null（serde(default) 兼容旧 JSON）。
+        year: None,
+        genre: None,
+        track: None,
+        track_total: None,
     }
 }
 
@@ -49,6 +54,10 @@ fn cand_album(
         artist: artist.to_string(),
         album: album.to_string(),
         cover_url: None,
+        year: None,
+        genre: None,
+        track: None,
+        track_total: None,
     }
 }
 

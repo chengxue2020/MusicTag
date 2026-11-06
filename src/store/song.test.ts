@@ -19,6 +19,7 @@ vi.mock('../api/search', () => ({
   searchSource: vi.fn(async () => []),
   fetchLyric: vi.fn(async () => null),
   downloadCover: vi.fn(async () => []),
+  searchMetadataFallback: vi.fn(async () => []),
 }))
 
 // mock @tauri-apps/api/core → store/song.ts 新增 `rememberLastDir` 后，activateFolder 默认

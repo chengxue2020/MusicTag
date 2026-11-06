@@ -13,7 +13,7 @@
 // 单源失败一律降级为空列表 / None。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{join_query_terms, MusicSource, SEARCH_TIMEOUT};
+use crate::service::searcher::{dates, join_query_terms, json_string, MusicSource, SEARCH_TIMEOUT};
 use async_trait::async_trait;
 use std::time::Duration;
 use tokio::task::JoinSet;
@@ -156,6 +156,10 @@ async fn search_storefront(
 /// `collectionName` → album；`artworkUrl100` → cover_url（`100x100bb` → `600x600bb` 高清替换）。
 /// 空字段兜底空串 / None（Rust 不 trim）。
 ///
+/// FR-8 #16：同一 `results[]` 里已有 `releaseDate` / `primaryGenreName` /
+/// `trackNumber` / `trackCount`，随既有响应带出 `year`/`genre`/`track`/`track_total`
+/// （零新增请求）。`releaseDate` 为 ISO 字符串，只取开头 4 位年份并校验范围。
+///
 /// `pub`：供 `src-tauri/tests/searcher_itunes_tests.rs` 直接断言（rust-tests-separation
 /// 单测外置；集成测试是独立 crate，仅 `pub` 可见）。
 pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
@@ -180,6 +184,15 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
             cover_url: it["artworkUrl100"]
                 .as_str()
                 .map(|u| u.replace("100x100bb", "600x600bb")),
+            year: it["releaseDate"]
+                .as_str()
+                .and_then(dates::year_from_date_str),
+            genre: it["primaryGenreName"]
+                .as_str()
+                .filter(|g| !g.trim().is_empty())
+                .map(String::from),
+            track: json_string(&it["trackNumber"]),
+            track_total: json_string(&it["trackCount"]),
         })
         .collect()
 }

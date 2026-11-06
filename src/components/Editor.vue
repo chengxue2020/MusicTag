@@ -3,12 +3,13 @@
 // - 空态：未选中/未打开 → 占位提示（design §6.1 空状态样式）
 // - 坏标签只读态：readonly === true → EditorBar 显示「标签损坏，只读」(danger)、
 //   正文区只读提示，不进入可编辑态（FR-5.7 / spec「坏标签只读」）
-// - 展示态：EditorBar + FieldGrid（字段列 + 封面区）+ LyricPanel（歌词）
+// - 展示态：EditorBar + FieldGrid（字段列 + 封面区）+ MetadataPanel（年份/元数据）+ LyricPanel（歌词）
 // 本变更仅展示形态：字段可编辑（v-model 绑 current），保存语义归 v1-song-save。
 import { songStore } from '../store/song'
 import EditorBar from './EditorBar.vue'
 import FieldGrid from './FieldGrid.vue'
 import LyricPanel from './LyricPanel.vue'
+import MetadataPanel from './MetadataPanel.vue'
 </script>
 
 <template>
@@ -30,9 +31,10 @@ import LyricPanel from './LyricPanel.vue'
         <span>标签损坏，只读</span>
       </div>
 
-      <!-- 表单主体：字段网格（左列）+ 歌词区（整宽） -->
+      <!-- 表单主体：字段网格（左列）+ 年份/元数据区 + 歌词区（整宽） -->
       <div v-else class="editor-body">
         <FieldGrid />
+        <MetadataPanel />
         <LyricPanel />
       </div>
     </template>

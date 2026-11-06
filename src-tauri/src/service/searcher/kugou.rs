@@ -229,6 +229,11 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
             artist: it["SingerName"].as_str().unwrap_or_default().to_string(),
             album: it["AlbumName"].as_str().unwrap_or_default().to_string(),
             cover_url: it["Image"].as_str().and_then(kugou_cover_url),
+            // FR-8 #16：complexsearch 响应无可信发行日期 / 流派 / 音轨号 → 保持 null（不臆测）。
+            year: None,
+            genre: None,
+            track: None,
+            track_total: None,
         })
         .collect()
 }

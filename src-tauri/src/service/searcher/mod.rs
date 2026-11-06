@@ -21,6 +21,8 @@
 // - `download_cover(url)`：点选封面下载（5s 超时 + 12MB 响应体限流）。
 
 pub mod crypto;
+pub mod dates;
+pub mod fallback;
 pub mod itunes;
 pub mod kugou;
 pub mod lrclib;

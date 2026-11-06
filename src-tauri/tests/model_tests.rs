@@ -174,6 +174,10 @@ fn song_candidate_serializes_to_contract_shape() {
         cover_url: Some(
             "http://y.qq.com/music/photo_new/T002R300x300M000004D3pK90wGyM2.jpg".into(),
         ),
+        year: None,
+        genre: None,
+        track: None,
+        track_total: None,
     };
     let json = serde_json::to_string(&c).unwrap();
     assert!(

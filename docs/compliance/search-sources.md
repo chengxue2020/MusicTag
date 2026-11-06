@@ -69,6 +69,20 @@
 | 核实状态 | 官方文档（Search API 由 Apple 公开发布；封面下载指向 mzstatic 图片域） |
 | 当前处理决定 | 仅用于元数据检索；不下载音频 |
 
+## 兜底来源（年份补全，用户手动触发，FR-8 #18/#19）
+
+> 仅当常规五源至少一源成功（`all_failed=false`）、候选里无可信年份、且用户**手动点击「补全年份」**时才调用；离线（`all_failed=true`）不触发。若本首尚未执行常规搜索（歌词/封面齐全 → 选中即搜跳过），点击会**先补跑一次常规五源**（仍落在既有五源域名内，不新增域名），只有常规搜索成功且无可信年份时才调用本节兜底来源；常规搜索全失败则不调用。返回的是发行年份文本，不涉及音频内容；候选不落盘、切歌即弃、点选后才填入表单（不自动写盘）。
+
+| 项 | 记录 |
+|---|---|
+| 同平台备用端点 | `c.y.qq.com`：`smartbox_new.fcg`（联想）→ `fcg_play_single_song.fcg`（取 `album.time_public`）；`itunes.apple.com`：`/search` 的 JP / KR 店面（取 `releaseDate`）。**域名已在既有披露清单内**，但端点/店面与常规搜索不同，故单独记录 |
+| 新增平台域名 | `api.deezer.com`（`GET /search`，取 `data[].album.release_date`）、`musicbrainz.org`（`GET /ws/2/recording/?fmt=json`，取 `first-release-date`；按官方要求 1 req/s 限流并使用描述性 User-Agent） |
+| 发送字段 | 仅歌曲标题、歌手、专辑名的文本查询词（MusicBrainz 用同一组文本拼 `query`）；不发送本地音频内容、不发送本地文件路径；全部 HTTPS |
+| 返回内容用途 | 只取发行年份与用于匹配的歌名/歌手/专辑文本，展示为带来源标签的候选；用户点选后才填入「年份」字段；不下载音频、不下载封面、不批量抓取 |
+| 公开条款或接口文档链接 | Deezer https://developers.deezer.com/api ；MusicBrainz https://musicbrainz.org/doc/Development/XML_Web_Service/Version_2 （限流要求见 https://musicbrainz.org/doc/Development/Rate_Limiting ）；QQ / iTunes 条款同上文对应章节 |
+| 核实状态 | 公开资料整理（Deezer 搜索与 MusicBrainz Web Service 为公开发布接口；QQ 联想/单曲详情为 web 端公开行为，无官方接口文档） |
+| 当前处理决定 | 仅用于元数据检索；不下载音频；低频手动触发降低风控暴露；平台接口使用授权确认并入「未决事项」#3 |
+
 ## 第三方依赖与素材归属清单
 
 第三方依赖与内嵌素材的归属清单由 `scripts/generate-third-party-notices.mjs` 生成于仓库根

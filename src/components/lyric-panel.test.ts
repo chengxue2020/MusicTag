@@ -23,6 +23,7 @@ vi.mock('../api/search', () => ({
   searchSource: mockSearchSource,
   fetchLyric: mockFetchLyric,
   downloadCover: vi.fn(async () => []),
+  searchMetadataFallback: vi.fn(async () => []),
 }))
 
 import type { Song, SongCandidate } from '../api/types'

@@ -97,7 +97,8 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 | 4 | 字段区为两列：**左列字段、右列封面**（1:1 封面区） |
 | 5 | 封面区支持**点击选择图片**与**拖拽嵌入** |
 | 6 | 歌词区：来源 badge + 「同时保存为 .lrc」**复选框** + 等宽字体 textarea |
-| 7 | **字段无特例**：所有可编辑字段行为一致——**填了就存、不填就不存在**；无自动继承/补全（专辑作者不自动填成作者、音轨号不从搜索结果带出） |
+| 7 | **字段无特例**：所有可编辑字段行为一致——**填了就存、不填就不存在**；无自动继承/隐式补全（专辑作者不自动填成作者）。**例外仅限用户显式点选候选**：见 FR-3 #8 |
+| 8 | **元数据候选点选**：搜索候选可携带发行年份、流派、音轨号(/共)；用户在「年份 / 元数据」区**显式点选**一条候选后，仅把该候选里非空的值填入**当前为空**的同名字段（不覆盖用户已填内容、不自动写盘、不自动继承字段间的值）。候选文本原样填入，繁简折叠只用于匹配比较。写入仍走既有 `save_song`，字段映射不变 |
 
 ### FR-4 歌词行为
 | # | 需求 |
@@ -162,6 +163,10 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 | 13 | **手动触发**：歌词区、封面区各提供**手动搜索按钮**（「搜索歌词」「搜索封面」），随时可主动发起；删除内容后如需重新搜索，用手动按钮 |
 | 14 | **候选生命周期 = 当前歌曲**：切歌即清空候选（**不保留**）；未点选的候选在切歌时丢弃，无弹窗追问——手滑切歌重新搜索即可 |
 | 15 | **候选区可折叠**：歌词区、封面区候选区各提供「隐藏候选 ▲ / 展开候选 ▼」折叠按钮（默认展开）；收起后候选区整体隐藏（搜索状态/候选列表/空态/离线提示均不可见），再次点击展开恢复。**切歌后折叠重置为默认展开**（收起后切歌，新歌候选区默认展开——原「跨切歌保持」实测不好用已改）；换目录清空编辑态、重新选歌后默认展开。**仅候选区有内容**（搜索中/有候选/空态/离线）时才显示折叠按钮，无内容时不显示、不占位 |
+| 16 | **候选携带元数据**：`SongCandidate` 可携带 `year`/`genre`/`track`/`track_total`（各源响应里有则解析、无则为 `null`）。**不新增请求、不新增来源**：QQ `pubtime`、网易云 `publishTime`、iTunes `releaseDate`/`primaryGenreName`/`trackNumber`/`trackCount` 随既有搜索响应带出；`publishTime=0` 等缺失值不得换算成 1970 年。无可靠日期的源（LRCLIB 等）保持 `null` |
+| 17 | **「查不到」的判定**（A → B 级联网关）：区分三种状态——① 常规五源**至少一源成功且候选带可信年份** → 只展示候选，不触发兜底；② **至少一源成功但候选为空或均无可信年份**（`all_failed=false`，冷门歌正常空结果）→ 才允许兜底；③ **五源全部网络失败/超时**（`all_failed=true`）→ 会话离线，**不触发兜底**、不发请求，直接提示离线。判据是「本次常规搜索是否 `all_failed`」，不是「是否曾离线」。前端另以 `lastSearchAllFailed=null` 显式记录「本首尚未执行常规搜索」（歌词/封面齐全 → 选中即搜跳过，或刚切歌）：**这不是 ②**，不得直接发 B，须先补跑 A 后才能落入 ② 或 ③ |
+| 18 | **兜底按需触发**：仅当满足 #17 ②、或 `lastSearchAllFailed=null`（A 未跑，点击后先补跑 A）、当前年份为空且非只读时，「年份 / 元数据」区显示「补全年份」按钮；**用户手动点击**才发起查询：A 未跑则先调 `search_song`，A 全失败（③）或已带出可信年份（①）即停，只有 A 成功且无可信年份（②）才调 `search_metadata_fallback`；按钮旁提示「先查常规来源，查不到再查备用来源」。后台异步、不阻塞编辑；切歌即清空兜底候选。不做批量、不落盘缓存、不自动写盘 |
+| 19 | **兜底分级、命中即停**：一级为同平台备用端点（QQ 联想 + 单曲详情 `album.time_public`、iTunes JP/KR 店面 `releaseDate`）；一级无可信结果才跑二级（Deezer `album.release_date`、MusicBrainz `first-release-date`，后者按 1 req/s 限流并带描述性 User-Agent）。各级内部并发、各自 6s 超时，单源失败降级为空不影响其他源。返回候选带**来源标签 + 匹配度**，按匹配度降序、最多 8 条；歌名零关联或歌手不匹配扣分的低置信结果一律丢弃（宁缺毋滥），年份须在 1900 ~ 次年之间 |
 
 ---
 
@@ -380,7 +385,7 @@ enum SearchError {
 >   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`watch_folder(dir, watch_id) -> Result<(), String>`（替换/停止当前递归监听并通过 `folder-changed` 事件通知列表失效）、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
 >   - 封面导出（只读）：`pick_cover_save_path(song_path) -> Result<Option<String>, String>`（rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → `Ok(None)`，不写任何文件）、`export_cover(song_path, dest_path) -> Result<(), String>`（把标签内第一个 front cover 的原始字节写到目标路径，无 UI）；前端跨 IPC 只传源路径与目标路径，不传图片字节
->   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
+>   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）、`search_metadata_fallback(title, artist, album) -> Vec<MetadataCandidate>`（FR-8 #18：用户手动点「补全年份」才发起的分级兜底查询，带来源标签与匹配度；离线不触发）
 >   - 查漏：`scan_missing(dir, checks) -> MissingScanResult`（按需只读扫描歌名/歌手/专辑/封面/歌词缺失；仅返回路径和缺失维度，不批量编辑、不写盘）
 >   - 更新：`check_for_update() -> Result<UpdateCheckResult, String>`（当前/最新稳定版本、更新标记及 Release 页面地址）、`open_release_page(url) -> Result<(), String>`（用户主动操作，固定仓库 HTTPS Release URL 校验后打开）、`get_last_update_check_at(now) -> Option<String>`、`save_last_update_check_at(value) -> Result<(), String>`、`sync_menu_state(snapshot) -> Result<(), String>`
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。

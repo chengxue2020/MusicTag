@@ -57,7 +57,9 @@ export interface CoverInput {
   mime: string // image/jpeg | image/png | image/webp
 }
 
-/** 搜索候选（search_song 返回）。 */
+/** 搜索候选（search_song 返回）。
+ *  FR-8 #16：可选元数据随既有响应带出（各源有则解析、无则 null），不新增请求。
+ *  TS 侧声明为可选，旧夹具 / 旧载荷无需改动。 */
 export interface SongCandidate {
   source: MusicSourceId
   id: string
@@ -65,6 +67,22 @@ export interface SongCandidate {
   artist: string
   album: string
   cover_url: string | null
+  year?: string | null
+  genre?: string | null
+  track?: string | null
+  track_total?: string | null
+}
+
+/** 分级兜底年份候选（FR-8 #18/#19）。
+ *  source 是展示用自由文本标签（'QQ 单曲详情' / 'iTunes JP' / 'Deezer' / 'MusicBrainz'），
+ *  不属于 MusicSourceId 枚举；score 为匹配度。候选不落盘、切歌即弃。 */
+export interface MetadataCandidate {
+  year: string
+  title: string
+  artist: string
+  album: string
+  source: string
+  score: number
 }
 
 /** 五源聚合搜索结果。 */

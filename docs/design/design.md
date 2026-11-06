@@ -337,6 +337,21 @@ interface SongCandidate {
   id: string;
   title: string; artist: string; album: string;
   cover_url: string | null;
+  // 可选元数据（FR-8 #16）：各源响应里有则带出、无则 null。TS 侧可选，
+  // 旧调用方/测试夹具无需改动；Rust 侧字段带 #[serde(default)] 兼容旧 JSON。
+  year?: string | null;
+  genre?: string | null;
+  track?: string | null;
+  track_total?: string | null;
+}
+
+// 分级兜底查询候选（FR-8 #18/#19）：source 是展示用自由文本标签，
+// 不进 MusicSourceId 枚举，故不影响来源序 / source_stats / all_failed 语义。
+interface MetadataCandidate {
+  year: string;
+  title: string; artist: string; album: string;
+  source: string;   // 'QQ 单曲详情' | 'iTunes JP' | 'iTunes KR' | 'Deezer' | 'MusicBrainz'
+  score: number;    // 匹配度（歌名零关联丢弃、歌手不符扣分）
 }
 
 interface SearchResult {
@@ -384,6 +399,7 @@ interface UpdateCheckResult {
 | `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合）：逐源拿该源全部原始候选，不受每源 TOP 3 截断；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
+| `search_metadata_fallback(title, artist, album)` | `String, String, String → Vec<MetadataCandidate>` | **用户手动点「补全年份」才发起**（FR-8 #18）：本首尚未跑过常规搜索（`lastSearchAllFailed=null`）时，前端先补跑 `search_song`，A 全失败或已带出可信年份即停，只有 A 成功且无可信年份才调用本命令（严格 #17 ②）；一级同平台备用端点（QQ 联想+单曲详情、iTunes JP/KR）→ 无可信结果才跑二级（Deezer、MusicBrainz 1 req/s 限流），命中即停；各级内部并发、单源 6s 超时降级为空；返回带来源标签与匹配度的年份候选，最多 8 条，不落盘、不自动写盘 |
 | `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描所选缺失维度；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
 | `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | 替换当前递归监听目标；`dir=None` 停止监听；较旧 `watch_id` 不生效 |
 | `check_for_update()` | `() → Result<UpdateCheckResult, String>` | 异步分页查询 GitHub Releases、选择最高稳定语义版本并比较；失败返回中文错误 |

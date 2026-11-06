@@ -12,7 +12,7 @@
 // rust-tests-separation 单测外置 `tests/searcher_qqmusic_tests.rs`（集成测试是独立 crate，仅 `pub` 可见）。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{join_query_terms, MusicSource};
+use crate::service::searcher::{dates, join_query_terms, MusicSource};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -118,6 +118,9 @@ pub fn is_error_response(json: &serde_json::Value) -> bool {
 /// 映射（search-sources-renewal D2）：`songmid` → id（取歌词用 songmid）；`songname` → title；
 /// `singer[].name` → artist（逗号连接）；`albumname` → album（空 → `未分类专辑`）；
 /// `albummid` → 封面模板 `T002R300x300M000{albummid}.jpg`（空 → None）。
+///
+/// FR-8 #16：`pubtime` 是**秒级** Unix 时间戳，随既有响应带出 `year`；
+/// `0` / 缺失 / 越界一律 `None`（不产生假的 1970）。其余文本字段本源无可靠值 → `None`。
 pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
     let list = match json["data"]["song"]["list"].as_array() {
         Some(a) => a,
@@ -155,6 +158,13 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
                 .as_str()
                 .filter(|mid| !mid.is_empty())
                 .map(|mid| format!("https://y.qq.com/music/photo_new/T002R300x300M000{mid}.jpg")),
+            year: s["pubtime"]
+                .as_i64()
+                .or_else(|| s["pubtime"].as_str().and_then(|v| v.parse::<i64>().ok()))
+                .and_then(dates::year_from_unix_secs),
+            genre: None,
+            track: None,
+            track_total: None,
         })
         .collect()
 }
