@@ -81,12 +81,16 @@ The application package metadata and README version badge MUST identify the rele
 - **WHEN** a maintainer inspects the Tauri, Cargo, npm, and README version declarations for this release
 - **THEN** each declaration reports `0.2.4`
 
-### Requirement: v0.2.4 release notes summarize the missing-year filter
-The README MUST summarize user-visible changes introduced since v0.2.3 without claiming capabilities beyond the shipped behavior.
+### Requirement: v0.2.4 release notes summarize all shipped user-visible changes
+The README MUST summarize user-visible changes introduced since v0.2.3 without claiming capabilities beyond the shipped behavior, covering the missing-year filter, the independent online lyric search, and the cover candidate preview fallback.
 
-#### Scenario: Read v0.2.4 release notes
+#### Scenario: Read v0.2.4 release notes for the missing-year filter
 - **WHEN** a user reads the v0.2.4 release notes
 - **THEN** they can identify that the missing-field filter gained a year dimension with a "缺年份" badge and that its year detection matches the editor read side without writing to audio files, with wording consistent with the shipped application
+
+#### Scenario: Read v0.2.4 release notes for online lyrics and cover preview
+- **WHEN** a user reads the v0.2.4 release notes
+- **THEN** they can identify the independent online lyric search over two lyric-only providers and the cover candidate direct-preview fallback, with wording consistent with the shipped application
 
 ### Requirement: v0.2.4 Release build is verified after merge
 The v0.2.4 tag MUST use the existing tag-triggered workflow and produce a successful public Release containing Windows, macOS arm64, macOS x64, and Linux build assets after required CI passes.
