@@ -28,6 +28,12 @@
 
 千千 Plus 查无结果时仍返回一堆不相关热门候选（上游空结果语义不可用）。复用主搜索的 `searcher::norm`（繁→简折叠 + 全角半角 + 小写，只作用比较侧）与 `title_match` / `artist_match` 权重打分：**标题不相关的候选直接丢弃**，同 provider 按 id 去重，按分数降序取前 8；两源合计 ≤ 16 条，provider 固定序（千千 Plus → Rangotec）。
 
+**Rangotec UGC 身份清洗与去重（v0.2.4 显示修复）**：实测其身份字段存在四类脏数据 —— `artist` / `album` / `id` 落成字符串 `"None"` / `"null"` 等占位值；`album` 直接填成歌名，导致专辑列重复显示歌名；`artist` 为空；一次返回最多 50 条仅 `id` 不同、`(title, artist, album)` 完全相同的记录。处理顺序：
+
+1. `parse_rangotec_search` 用 `clean_provider_field()` 把 `id` / `title` / `artist` / `album` 的占位字面量（忽略大小写与首尾空白）清洗为空；`id` 或 `title` 清洗后为空的条目丢弃；`album` 归一化后等于 `title` 时置空。
+2. `rank_candidates` 仅对 `LyricsProvider::Rangotec` 追加按归一化 `(title, artist, album)` 的身份去重，保留上游 `od=asc` 顺序的第一条；不同歌手 / 专辑的版本各自保留。千千 Plus 候选本身带区分度，维持只按 id 去重的既有行为，避免把同歌名的不同版本误合并。
+3. 前端 `OnlineLyricCandidate.vue` 在 `artist` 为空时只显示 `title`，不拼接悬空的 ` — `；tooltip 与可见文案保持一致。
+
 ## D4 惰性拉取与 LRC 清洗
 
 Rangotec 的 JSON 响应虽含 `lrc` 全文，但按仓库既有「点选才取正文」约定不随 IPC 带出，`search_lyrics` 只返回身份 + 匹配度；点选后 `fetch_online_lyric(provider, id)` 按 id 取词。取回后两源共用 `clean_lrc`：

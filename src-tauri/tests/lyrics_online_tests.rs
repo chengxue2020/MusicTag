@@ -120,14 +120,36 @@ fn parse_rangotec_search_requires_business_code_200() {
     let list = parse_rangotec_search(&ok);
     assert_eq!(list.len(), 2, "缺 id/title 的条目应丢弃");
     assert_eq!(list[0].id, "446826", "数字 id 应转字符串");
-    assert_eq!(list[0].album, "可能");
+    // 上游把歌名直接填进 album，视为无专辑（避免专辑列重复显示歌名）。
+    assert_eq!(list[0].album, "");
     // RawLyricCandidate 只有身份字段，lrc 全文不随解析结果带出（惰性拉取）
     assert_eq!(list[0], RawLyricCandidate {
         id: "446826".into(),
         title: "可能".into(),
         artist: "程响".into(),
-        album: "可能".into(),
+        album: "".into(),
     });
+}
+
+#[test]
+fn parse_rangotec_search_cleans_placeholder_identity_fields() {
+    let json = serde_json::json!({
+        "code": 200,
+        "data": [
+            {"id": 446826, "artist": "None", "title": "可能", "album": "None"},
+            {"id": 446827, "artist": "", "title": "可能", "album": "可能"},
+            {"id": 446828, "artist": "程响", "title": "可能", "album": " null "},
+            {"id": "None", "artist": "程响", "title": "可能", "album": ""}
+        ]
+    });
+    let list = parse_rangotec_search(&json);
+    assert_eq!(list.len(), 3, "id 为占位值的条目应丢弃");
+    assert_eq!(list[0].artist, "", "字符串 None 应清洗为空");
+    assert_eq!(list[0].album, "");
+    assert_eq!(list[1].artist, "");
+    assert_eq!(list[1].album, "", "专辑等于歌名应置空");
+    assert_eq!(list[2].artist, "程响", "正常歌手名不受影响");
+    assert_eq!(list[2].album, "", "带空白的 null 也应清洗");
 }
 
 // ---- 打分过滤 ----
@@ -159,6 +181,45 @@ fn rank_candidates_respects_limit() {
         })
         .collect();
     assert_eq!(rank_candidates(raw, "可能", "程响", LyricsProvider::Rangotec, 8).len(), 8);
+}
+
+#[test]
+fn rank_candidates_dedupes_rangotec_identical_identity() {
+    let mut raw: Vec<RawLyricCandidate> = (0..6)
+        .map(|i| RawLyricCandidate {
+            id: i.to_string(),
+            title: "可能".into(),
+            artist: "程响".into(),
+            album: "".into(),
+        })
+        .collect();
+    raw.push(RawLyricCandidate {
+        id: "9".into(),
+        title: "可能".into(),
+        artist: "李怡然同学".into(),
+        album: "".into(),
+    });
+    let list = rank_candidates(raw, "可能", "程响", LyricsProvider::Rangotec, 8);
+    assert_eq!(list.len(), 2, "同身份只留一条，不同歌手版本仍保留");
+    assert_eq!(list[0].id, "0", "保留上游 od=asc 顺序的第一条");
+    assert_eq!(list[1].artist, "李怡然同学");
+}
+
+#[test]
+fn rank_candidates_keeps_qianqian_distinct_ids() {
+    let raw: Vec<RawLyricCandidate> = (0..3)
+        .map(|i| RawLyricCandidate {
+            id: i.to_string(),
+            title: "可能".into(),
+            artist: "程响".into(),
+            album: "".into(),
+        })
+        .collect();
+    assert_eq!(
+        rank_candidates(raw, "可能", "程响", LyricsProvider::Qianqian, 8).len(),
+        3,
+        "千千 Plus 维持只按 id 去重的既有行为"
+    );
 }
 
 // ---- LRC 清洗（用户决定：去掉千千 Plus 署名/版权声明） ----

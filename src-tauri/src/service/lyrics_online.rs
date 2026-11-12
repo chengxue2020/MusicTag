@@ -295,6 +295,22 @@ fn value_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// 上游 UGC 库把空值落成了字符串字面量（实测 Rangotec 的 `artist` / `album`
+/// 会出现 `"None"`、`"null"`），原样渲染会让候选条显示 `None`；统一清洗成空串。
+fn clean_provider_field(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.is_empty()
+        || matches!(
+            trimmed.to_ascii_lowercase().as_str(),
+            "none" | "null" | "nil" | "undefined" | "n/a"
+        )
+    {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// 解析 Rangotec 公开 JSON API：先判业务码 `code == 200`，再取 `data[]`。
 /// `lrc` 全文随响应返回但按惰性拉取约定不随 IPC 带出，点选后再按 id 取词。
 pub fn parse_rangotec_search(json: &serde_json::Value) -> Vec<RawLyricCandidate> {
@@ -307,16 +323,22 @@ pub fn parse_rangotec_search(json: &serde_json::Value) -> Vec<RawLyricCandidate>
     items
         .iter()
         .filter_map(|item| {
-            let id = value_text(&item["id"]).unwrap_or_default();
-            let title = value_text(&item["title"]).unwrap_or_default();
+            let id = clean_provider_field(&value_text(&item["id"]).unwrap_or_default());
+            let title = clean_provider_field(&value_text(&item["title"]).unwrap_or_default());
             if id.is_empty() || title.is_empty() {
                 return None;
+            }
+            let artist = clean_provider_field(&value_text(&item["artist"]).unwrap_or_default());
+            let mut album = clean_provider_field(&value_text(&item["album"]).unwrap_or_default());
+            // 上游常把歌名直接填进 album：专辑列会重复显示歌名，视为无专辑。
+            if !album.is_empty() && searcher::norm(&album) == searcher::norm(&title) {
+                album.clear();
             }
             Some(RawLyricCandidate {
                 id,
                 title,
-                artist: value_text(&item["artist"]).unwrap_or_default(),
-                album: value_text(&item["album"]).unwrap_or_default(),
+                artist,
+                album,
             })
         })
         .collect()
@@ -334,6 +356,11 @@ pub fn rank_candidates(
     let qt = searcher::norm(query_title);
     let qa = searcher::norm(query_artist);
     let mut seen: HashSet<String> = HashSet::new();
+    // Rangotec 一次可返回 50 条仅 id 不同、身份字段完全相同的记录：按归一化身份去重，
+    // 保留上游顺序的第一条（od=asc 的最老数据），不同歌手的版本仍各自保留。
+    // 千千 Plus 候选本身带区分度，维持只按 id 去重的既有行为。
+    let mut seen_identity: HashSet<(String, String, String)> = HashSet::new();
+    let dedupe_identity = provider == LyricsProvider::Rangotec;
     let mut scored: Vec<LyricCandidate> = raw
         .into_iter()
         .filter_map(|r| {
@@ -344,6 +371,11 @@ pub fn rank_candidates(
                 return None; // 标题不相关 → 上游热门候选，丢弃
             }
             if !seen.insert(r.id.clone()) {
+                return None;
+            }
+            if dedupe_identity
+                && !seen_identity.insert((t.clone(), a.clone(), searcher::norm(&r.album)))
+            {
                 return None;
             }
             Some(LyricCandidate {

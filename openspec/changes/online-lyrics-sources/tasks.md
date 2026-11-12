@@ -28,3 +28,13 @@
 - [x] 4.1 `docs/design/design.md` §10.3 + `docs/V1-PRD.md` §7 + `openspec/config.yaml` 契约清单加两个 command（23 → 25）；`src/styles/command-contract.test.ts` 数量断言同步。
 - [x] 4.2 `README.md` 功能特性 + 外部 API 数据披露（域名 / 发送字段 / 触发时机）；`docs/compliance/search-sources.md` 新增两源专节（协议、编码、限流、清洗、版权提示、未决事项引用）。
 - [x] 4.3 本 openspec change：`proposal.md` / `design.md` / `tasks.md` + `specs/online-lyrics-sources/spec.md` + `specs/search-ui/spec.md` delta。
+
+## G5 Rangotec 候选显示修复（v0.2.4 重发）
+
+> 用户反馈：千千 Plus 候选显示正确，Rangotec 显示「像歌名但不确定」。实测为上游 UGC 身份字段脏数据 + 大量重复记录，并非编码乱码。
+
+- [x] 5.1 `service/lyrics_online.rs` 增 `clean_provider_field()`：清洗 `id` / `title` / `artist` / `album` 的 `"None"` / `"null"` / `"nil"` / `"undefined"` / `"n/a"` 占位值；`album` 归一化等于 `title` 时置空。
+- [x] 5.2 `rank_candidates()` 仅对 Rangotec 追加按归一化 `(title, artist, album)` 的身份去重，保留 `od=asc` 顺序第一条；千千 Plus 维持只按 id 去重。
+- [x] 5.3 `components/OnlineLyricCandidate.vue`：artist 为空时只显示歌名，不拼接悬空 ` — `，tooltip 与可见文案一致。
+- [x] 5.4 回归测试：`src-tauri/tests/lyrics_online_tests.rs` 增占位字段清洗 / 身份去重 / 千千 Plus 不受影响三例；`src/components/lyric-panel.test.ts` 增候选条渲染一例。
+- [x] 5.5 同步 `design.md` D3、`spec.md` 新增 Requirement、`docs/compliance/search-sources.md` Rangotec 已知限制栏、`README.md` v0.2.4 更新说明。

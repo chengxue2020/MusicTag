@@ -2,26 +2,35 @@
 // 在线歌词候选条（online-lyrics-sources）：来源标签（千千 Plus / Rangotec）+ 歌名 — 作者 + 专辑。
 // 与主搜索的 LyricCandidate.vue 分开：在线源不属于 MusicSourceId，不参与 C2 换源，
 // 点击 → store.pickOnlineLyric（点选才 fetch_online_lyric 拉正文，惰性拉取）。
+// 上游 artist 可能为空（Rangotec UGC），此时只显示歌名，不留下悬空的 " — "。
+import { computed } from 'vue'
 import type { LyricCandidate } from '../api/types'
 import { lyricsProviderLabel } from '../store/selectors'
 import { pickOnlineLyric } from '../store/song'
 
-defineProps<{
+const props = defineProps<{
   cand: LyricCandidate
   disabled: boolean
 }>()
+
+const label = computed(() =>
+  props.cand.artist ? `${props.cand.title} — ${props.cand.artist}` : props.cand.title,
+)
+const tooltip = computed(() =>
+  props.cand.album ? `${label.value} · ${props.cand.album}` : label.value,
+)
 </script>
 
 <template>
   <button
     type="button"
     class="online-cand-row"
-    :title="`${cand.title} — ${cand.artist}${cand.album ? ` · ${cand.album}` : ''}`"
+    :title="tooltip"
     :disabled="disabled"
     @click="pickOnlineLyric(cand)"
   >
     <span class="src-tag">{{ lyricsProviderLabel(cand.provider) }}</span>
-    <span class="cand-text">{{ cand.title }} — {{ cand.artist }}</span>
+    <span class="cand-text">{{ label }}</span>
     <span v-if="cand.album" class="cand-album">{{ cand.album }}</span>
   </button>
 </template>

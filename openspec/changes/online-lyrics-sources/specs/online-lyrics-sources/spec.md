@@ -64,3 +64,24 @@
 #### Scenario: 切歌即弃
 - **WHEN** 在线候选还在展示时用户切到另一首歌
 - **THEN** 在线候选清空、状态归 idle、在途请求结果被丢弃
+
+### Requirement: Rangotec 候选身份字段清洗、去重与展示
+
+Rangotec 为 UGC 歌词库，身份字段含占位字面量、与歌名重复的专辑值及大量仅 id 不同的重复记录。系统 SHALL 在解析与排序阶段清洗并去重候选，候选条 SHALL 在歌手为空时只显示歌名。
+
+- 系统 SHALL 把 `id` / `title` / `artist` / `album` 中的占位字面量（`None` / `null` / `nil` / `undefined` / `n/a`，忽略大小写与首尾空白）清洗为空串；`id` 或 `title` 清洗后为空的条目 SHALL 丢弃。
+- 当 `album` 归一化后等于 `title` 时，系统 SHALL 把 `album` 视为空，专辑列 SHALL NOT 重复显示歌名。
+- 对 `LyricsProvider::Rangotec`，系统 SHALL 在按 id 去重之外再按归一化的 `(title, artist, album)` 身份去重，保留上游 `od=asc` 顺序的第一条；不同歌手或专辑的版本 SHALL 各自保留。千千 Plus SHALL 维持只按 id 去重的既有行为。
+- 在线候选条在 `artist` 为空时 SHALL 只显示来源标签与 `title`，SHALL NOT 显示悬空的连接符或空专辑列；tooltip SHALL 与可见文案一致。
+
+#### Scenario: 占位字段与重复歌名专辑
+- **WHEN** Rangotec 返回 `artist="None"`、`album="可能"`（与 `title` 相同）以及 `id="None"` 的条目
+- **THEN** 展示的候选中 `artist` / `album` 为空、不出现 `None` 字面量或重复的歌名，`id` 为占位值的条目被丢弃
+
+#### Scenario: 同一首歌的大量重复记录
+- **WHEN** Rangotec 一次返回 50 条仅 `id` 不同、`title` / `artist` / `album` 完全相同的记录
+- **THEN** 候选列表只保留上游顺序的第一条，且不同歌手或专辑的版本仍能各自显示
+
+#### Scenario: 歌手为空的候选条
+- **WHEN** 在线候选的 `artist` 为空
+- **THEN** 候选条显示「歌名」而非「歌名 — 」，且不渲染空的专辑列

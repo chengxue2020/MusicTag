@@ -581,4 +581,25 @@ describe('LyricPanel — 在线搜词独立入口（online-lyrics-sources）', (
     expect(w.find('.online-wrap .cand-list').exists()).toBe(true)
     expect(w.findAll('.online-wrap .online-cand-row')).toHaveLength(1)
   })
+
+  it('Rangotec 候选 artist 为空时只显示歌名，不留下悬空破折号', async () => {
+    mockSearchLyrics.mockResolvedValueOnce([
+      onlineCand({ provider: 'rangotec', id: '446826', artist: '', album: '' }),
+      onlineCand({ provider: 'rangotec', id: '446827', artist: '程响', album: '单曲' }),
+    ])
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+
+    const rows = w.findAll('.online-wrap .online-cand-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].find('.cand-text').text()).toBe('可能')
+    expect(rows[0].find('.cand-text').text()).not.toContain('—')
+    expect(rows[0].attributes('title')).toBe('可能')
+    expect(rows[0].find('.cand-album').exists()).toBe(false)
+    expect(rows[1].find('.cand-text').text()).toBe('可能 — 程响')
+    expect(rows[1].attributes('title')).toBe('可能 — 程响 · 单曲')
+    expect(rows[1].find('.cand-album').text()).toBe('单曲')
+  })
 })
