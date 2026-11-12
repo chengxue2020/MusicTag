@@ -22,6 +22,8 @@ vi.mock('../api/search', () => ({
   fetchLyric: vi.fn(async () => null),
   downloadCover: vi.fn(async () => []),
   searchMetadataFallback: mockFallback,
+  searchLyrics: vi.fn(async () => []),
+  fetchOnlineLyric: vi.fn(async () => null),
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({

@@ -360,6 +360,16 @@ interface SearchResult {
   all_failed: boolean;  // 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false。注：iTunes 仅 HK/US 两店面全部失败才算失败（Issue #152）
 }
 
+// 独立在线歌词契约（online-lyrics-sources）：两源只有歌词、无其他元信息，
+// 故 provider 不进 MusicSourceId 枚举，候选形状也与 SongCandidate 分离。
+type LyricsProvider = 'qianqian' | 'rangotec';
+interface LyricCandidate {
+  provider: LyricsProvider;
+  id: string;
+  title: string; artist: string; album: string;
+  score: number;   // 归一化 title/artist 匹配度（复用主搜索权重）
+}
+
 // 业务检查顺序固定：title → artist → album → cover → lyrics → year（year 追加末尾）
 type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics' | 'year';
 interface MissingSong { path: string; missing: MissingField[]; }
@@ -401,6 +411,8 @@ interface UpdateCheckResult {
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 | `search_metadata_fallback(title, artist, album)` | `String, String, String → Vec<MetadataCandidate>` | **用户手动点「补全年份」才发起**（FR-8 #18）：本首尚未跑过常规搜索（`lastSearchAllFailed=null`）时，前端先补跑 `search_song`，A 全失败或已带出可信年份即停，只有 A 成功且无可信年份才调用本命令（严格 #17 ②）；一级同平台备用端点（QQ 联想+单曲详情、iTunes JP/KR）→ 无可信结果才跑二级（Deezer、MusicBrainz 1 req/s 限流），命中即停；各级内部并发、单源 6s 超时降级为空；返回带来源标签与匹配度的年份候选，最多 8 条，不落盘、不自动写盘 |
+| `search_lyrics(title, artist)` | `String, String → Vec<LyricCandidate>` | **独立在线搜词**（online-lyrics-sources）：千千 Plus + Rangotec 两源并发，只查歌词（无封面/年份等元信息，故**不进** `MusicSource` / 五源聚合 / `source_stats` / `all_failed` / C2）。空 title 后端守卫返回空列表；单源失败只降级空结果；标题不相关的热门候选由本地打分剔除；仅歌词面板「在线搜词」按钮手动触发，不自动搜、不标离线 |
+| `fetch_online_lyric(provider, id)` | `LyricsProvider, String → Option<String>` | 点选在线歌词候选后按 provider + id 取 LRC 正文。按响应头/XML 声明解码 UTF-8/GBK，去千千 Plus 署名与版权声明、滤版权/翻唱广告行、增强型双时间戳 `[00:00:820,00:04:100]` 转标准 `[00:00.82]`；清洗后为空或请求失败 → `None`。填入 `Song.lyrics` 后仍走 `save_song` / `.lrc` 侧载既有链路 |
 | `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描六个缺失维度（歌名/歌手/专辑/封面/歌词/年份，固定顺序 `title → artist → album → cover → lyrics → year`）；年份复用 `reader::tagged_file_year` 这一读侧唯一出口（`RecordingDate` 优先、`Year` 兜底、WAV 回退 RIFF INFO），`trim()` 后为空才算缺失；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
 | `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | 替换当前递归监听目标；`dir=None` 停止监听；较旧 `watch_id` 不生效 |
 | `check_for_update()` | `() → Result<UpdateCheckResult, String>` | 异步分页查询 GitHub Releases、选择最高稳定语义版本并比较；失败返回中文错误 |

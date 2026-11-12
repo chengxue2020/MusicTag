@@ -11,15 +11,23 @@
 // - 渲染优先级（CR C2）：`lyricFetchEmpty` 分支必须**先于** done 分支——真实流程里
 //   pickLyricCandidate 全源失败置 lyricFetchEmpty 时 `lyricSearchState` 仍是 'done'、候选仍在，
 //   若空态分支排在 done 之后则永远不可达。manualSearch 清 lyricFetchEmpty，新搜索不残留旧空态。
+// - 在线搜词（online-lyrics-sources）：第二个按钮 + **独立候选区**，走 store.searchOnlineLyrics /
+//   pickOnlineLyric，与上面五源主搜索的状态机、折叠按钮、C2 链完全分离。两个源只提供歌词，
+//   无封面/年份等元信息，故不进主搜索接口。
 // 分层：组件不直呼 invoke（store 动作注入 api/search 默认），零 invoke 直呼（layering 守卫）。
 import { computed, ref, watch } from 'vue'
 
-import { sourceLabel } from '../store/selectors'
-import { manualSearch, songStore } from '../store/song'
+import { lyricsProviderLabel, sourceLabel } from '../store/selectors'
+import { manualSearch, searchOnlineLyrics, songStore } from '../store/song'
 import LyricCandidate from './LyricCandidate.vue'
+import OnlineLyricCandidate from './OnlineLyricCandidate.vue'
 
 /** 来源 badge 文案（D8：点选候选平台优先，否则 lyrics_source 映射）。 */
 const badgeText = computed(() => {
+  // 在线歌词来源（不属于 MusicSourceId）优先，其次主搜索点选平台，最后文件内来源。
+  if (songStore.onlineLyricProvider !== null) {
+    return `来源: ${lyricsProviderLabel(songStore.onlineLyricProvider)}`
+  }
   if (songStore.lyricSourcePlatform !== null) {
     return `来源: ${sourceLabel(songStore.lyricSourcePlatform)}`
   }
@@ -35,6 +43,22 @@ const badgeText = computed(() => {
 
 /** 「搜索歌词」可用性：readonly（坏标签只读）/ 无歌禁用。 */
 const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
+
+/** 「在线搜词」可用性：同主搜索守卫 + 搜索中/取词中禁用（防连点）。 */
+const canOnlineSearch = computed(
+  () =>
+    canSearch.value &&
+    songStore.onlineLyricState !== 'searching' &&
+    !songStore.onlineLyricFetching,
+)
+
+/** 在线搜词进行中（搜索候选或点选后取正文）。 */
+const onlineBusy = computed(
+  () => songStore.onlineLyricState === 'searching' || songStore.onlineLyricFetching,
+)
+const onlineBusyText = computed(() =>
+  songStore.onlineLyricFetching ? '取词中…' : '搜索中…',
+)
 
 // 候选区折叠（candidate-collapse）：组件局部 ref，默认展开；点按钮折叠。
 // 切歌（current.path 变）时重置为默认展开——产品决策：折叠偏好不跨切歌保持（用户收起后
@@ -78,13 +102,22 @@ const candidatesVisible = computed(
       </label>
     </div>
 
-    <!-- 「搜索歌词」手动按钮（design §6.2：head 与 textarea 之间） -->
-    <button
-      class="search-trigger"
-      type="button"
-      :disabled="!canSearch"
-      @click="manualSearch('lyrics')"
-    >🔍 搜索歌词</button>
+    <!-- 两个手动按钮（design §6.2：head 与 textarea 之间）。
+         左：五源主搜索（manualSearch）；右：独立在线搜词（online-lyrics-sources），互不干扰。 -->
+    <div class="search-actions">
+      <button
+        class="search-trigger"
+        type="button"
+        :disabled="!canSearch"
+        @click="manualSearch('lyrics')"
+      >🔍 搜索歌词</button>
+      <button
+        class="search-trigger online-trigger"
+        type="button"
+        :disabled="!canOnlineSearch"
+        @click="searchOnlineLyrics()"
+      >🌐 在线搜词</button>
+    </div>
 
     <!-- 候选区折叠按钮（candidate-collapse）：候选区有内容才显示；折叠只做 v-show 包装，不动候选 DOM/搜索状态 -->
     <button
@@ -113,6 +146,29 @@ const candidatesVisible = computed(
         <div v-else class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
       </template>
       <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
+    </div>
+
+    <!-- 在线歌词候选区（online-lyrics-sources）：独立状态机，不受上面的折叠按钮 / C2 链影响。
+         两个源只有歌词、无其他元信息，点选后仍复用歌词 textarea + 既有保存 / .lrc 链路。 -->
+    <div v-if="songStore.onlineLyricState !== 'idle'" class="online-wrap">
+      <div class="online-head">在线歌词 · 千千 Plus / Rangotec</div>
+      <div v-if="onlineBusy" class="cand-status">
+        {{ onlineBusyText }}<span class="spinner" aria-hidden="true"></span>
+      </div>
+      <template v-else>
+        <div v-if="songStore.onlineLyricCandidates.length" class="cand-list">
+          <OnlineLyricCandidate
+            v-for="c in songStore.onlineLyricCandidates"
+            :key="`${c.provider}:${c.id}`"
+            :cand="c"
+            :disabled="songStore.onlineLyricFetching"
+          />
+        </div>
+        <div v-if="songStore.onlineLyricError" class="online-error">{{ songStore.onlineLyricError }}</div>
+        <div v-else-if="!songStore.onlineLyricCandidates.length" class="cand-empty">
+          未找到匹配的在线歌词，可手动粘贴
+        </div>
+      </template>
     </div>
 
     <textarea
@@ -204,6 +260,52 @@ const candidatesVisible = computed(
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* 在线搜词（online-lyrics-sources）：两个手动按钮并排，各占一半宽度 */
+.search-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.search-actions .search-trigger {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.online-trigger:hover:not(:disabled) {
+  border-style: solid;
+}
+
+.online-wrap {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.online-head {
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.online-error {
+  padding: 4px 0 2px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.online-wrap .cand-status,
+.online-wrap .cand-empty {
+  padding: 4px 0 2px;
+}
+
+.online-wrap .cand-list {
+  margin-bottom: 0;
 }
 
 /* 候选区折叠按钮（candidate-collapse）：对齐 .search-trigger 克制风格，尺寸更小；

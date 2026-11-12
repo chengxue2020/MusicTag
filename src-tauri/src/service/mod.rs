@@ -8,6 +8,7 @@ pub mod cover;
 pub mod folder_watch;
 pub mod fs_atomic;
 pub mod lyrics;
+pub mod lyrics_online;
 pub mod meta;
 pub mod missing;
 pub mod reader;

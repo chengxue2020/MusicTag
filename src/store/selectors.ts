@@ -2,7 +2,7 @@
 // 只从 songStore 派生展示数据，不持有/修改状态。
 import { computed } from 'vue'
 
-import type { MusicSourceId, SongSummary } from '../api/types'
+import type { LyricsProvider, MusicSourceId, SongSummary } from '../api/types'
 import { fileName, fileNameStem } from '../lib/path'
 import { songStore } from './song'
 
@@ -19,6 +19,16 @@ export function sourceLabel(source: MusicSourceId): string {
       return 'LRCLIB'
     case 'itunes':
       return 'iTunes'
+  }
+}
+
+/** 在线歌词来源展示文案（独立于主搜索来源标签，两源只有歌词、不属于 MusicSourceId）。 */
+export function lyricsProviderLabel(provider: LyricsProvider): string {
+  switch (provider) {
+    case 'qianqian':
+      return '千千 Plus'
+    case 'rangotec':
+      return 'Rangotec'
   }
 }
 

@@ -28,6 +28,9 @@ tempfile = "3.27.0"
 dirs = "6"
 # v1-search-backend：五源并发搜索 / 网易云加密 / 封面下载
 reqwest = { version = "0.13", features = ["json", "form"] }
+# online-lyrics-sources：千千 Plus 搜索 XML / LRC 文本可能按 GBK(GB2312) 返回，
+# 需按响应头或 XML 声明解码；Cargo.lock 已间接含 encoding_rs，此处显式声明。
+encoding_rs = "0.8"
 tokio = { version = "1", features = ["time", "macros", "rt"] }
 async-trait = "0.1"
 aes = "0.8"

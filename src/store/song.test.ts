@@ -20,6 +20,8 @@ vi.mock('../api/search', () => ({
   fetchLyric: vi.fn(async () => null),
   downloadCover: vi.fn(async () => []),
   searchMetadataFallback: vi.fn(async () => []),
+  searchLyrics: vi.fn(async () => []),
+  fetchOnlineLyric: vi.fn(async () => null),
 }))
 
 // mock @tauri-apps/api/core → store/song.ts 新增 `rememberLastDir` 后，activateFolder 默认
@@ -32,7 +34,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
-import type { CoverInput, MissingScanResult, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
+import type { CoverInput, LyricCandidate, MissingScanResult, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
 import { searchSongs as mockedSearchSongs } from '../api/search'
 import {
   activateFolder,
@@ -45,8 +47,10 @@ import {
   open,
   pickCoverCandidate,
   pickLyricCandidate,
+  pickOnlineLyric,
   rememberLastDir,
   requestFolder,
+  searchOnlineLyrics,
   requestSwitch,
   resolvePending,
   save,
@@ -2313,5 +2317,166 @@ describe('目录监听与独立列表刷新（#123）', () => {
     })
     await activateFolder('/a', loader)
     expect(order).toEqual(['listen-start', 'watch:/a', 'list'])
+  })
+})
+
+// online-lyrics-sources：两源只提供歌词，产品约束「不进主搜索」。以下用例锁定独立状态机：
+// 不调用 searchSongs、不写 isOffline / lyricCandidates / C2 平台语义；点选后仍复用既有
+// current.lyrics + dirty + save_song 写盘链路。
+describe('songStore — 独立在线搜词（online-lyrics-sources）', () => {
+  const onlineCand = (over: Partial<LyricCandidate> = {}): LyricCandidate => ({
+    provider: 'qianqian',
+    id: '48734',
+    title: '可能',
+    artist: '程响',
+    album: '',
+    score: 0.9,
+    ...over,
+  })
+
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.isOffline = false
+    songStore.searchedThisSong = false
+    songStore.lyricCandidates = []
+    songStore.coverCandidates = []
+    songStore.lyricSearchState = 'idle'
+    songStore.lyricSourcePlatform = null
+    songStore.lyricFetchEmpty = false
+    songStore.onlineLyricState = 'idle'
+    songStore.onlineLyricCandidates = []
+    songStore.onlineLyricSeq = 0
+    songStore.onlineLyricFetching = false
+    songStore.onlineLyricError = ''
+    songStore.onlineLyricProvider = null
+    vi.mocked(mockedSearchSongs).mockClear()
+  })
+
+  it('搜索成功 → 独立候选区 + state=done；不触发五源主搜索、不标离线、不动主候选', async () => {
+    const search = vi.fn(async () => [
+      onlineCand(),
+      onlineCand({ provider: 'rangotec', id: '446826' }),
+    ])
+
+    await searchOnlineLyrics(search)
+
+    expect(search).toHaveBeenCalledWith('歌名', '作者')
+    expect(songStore.onlineLyricState).toBe('done')
+    expect(songStore.onlineLyricCandidates).toHaveLength(2)
+    expect(songStore.onlineLyricError).toBe('')
+    expect(mockedSearchSongs).not.toHaveBeenCalled() // 产品约束：独立链路不进主搜索
+    expect(songStore.lyricSearchState).toBe('idle')
+    expect(songStore.lyricCandidates).toEqual([])
+    expect(songStore.isOffline).toBe(false)
+    expect(songStore.lyricSourcePlatform).toBeNull()
+  })
+
+  it('空结果 / 上游异常 → 空态文案，且不标会话离线', async () => {
+    await searchOnlineLyrics(async () => [])
+    expect(songStore.onlineLyricState).toBe('done')
+    expect(songStore.onlineLyricError).toBe('未找到匹配的在线歌词，可手动粘贴')
+    expect(songStore.isOffline).toBe(false)
+
+    await searchOnlineLyrics(async () => {
+      throw new Error('upstream 500')
+    })
+    expect(songStore.onlineLyricState).toBe('done')
+    expect(songStore.onlineLyricCandidates).toEqual([])
+    expect(songStore.onlineLyricError).toBe('在线歌词服务不可用，可手动粘贴')
+    expect(songStore.isOffline).toBe(false) // 手动语义：单源失败不升级为会话离线
+  })
+
+  it('无歌 / 标题与艺术家皆空 / 坏标签只读 → 不发请求', async () => {
+    const search = vi.fn(async () => [onlineCand()])
+
+    songStore.current = null
+    await searchOnlineLyrics(search)
+    expect(search).not.toHaveBeenCalled()
+
+    songStore.current = { ...makeSong({ title: '', artist: '' }) }
+    await searchOnlineLyrics(search)
+    expect(search).not.toHaveBeenCalled()
+
+    songStore.current = { ...makeSong() }
+    songStore.readonly = true
+    await searchOnlineLyrics(search)
+    expect(search).not.toHaveBeenCalled()
+  })
+
+  it('重复点击：旧响应 resolve 被 onlineLyricSeq 作废，不覆盖新结果', async () => {
+    let resolveOld!: (list: LyricCandidate[]) => void
+    const oldSearch = vi.fn(
+      () => new Promise<LyricCandidate[]>((resolve) => { resolveOld = resolve }),
+    )
+    const first = searchOnlineLyrics(oldSearch)
+    expect(songStore.onlineLyricState).toBe('searching')
+
+    await searchOnlineLyrics(async () => [onlineCand({ id: 'fresh' })])
+    resolveOld([onlineCand({ id: 'stale' })])
+    await first
+    await flushPromises()
+
+    expect(songStore.onlineLyricCandidates.map((c) => c.id)).toEqual(['fresh'])
+    expect(songStore.onlineLyricState).toBe('done')
+  })
+
+  it('点选成功 → 写入 current.lyrics + badge 用在线 provider + dirty 自动翻转', async () => {
+    await searchOnlineLyrics(async () => [onlineCand()])
+    const fetchOnline = vi.fn(async () => '[00:10.12]可能南方的阳光\n')
+    expect(songStore.dirty).toBe(false)
+
+    await pickOnlineLyric(onlineCand(), fetchOnline)
+
+    expect(fetchOnline).toHaveBeenCalledWith('qianqian', '48734')
+    expect(songStore.current!.lyrics).toBe('[00:10.12]可能南方的阳光\n')
+    expect(songStore.onlineLyricProvider).toBe('qianqian')
+    expect(songStore.lyricSourcePlatform).toBeNull() // 不污染 C2 平台语义
+    expect(songStore.lyricFetchEmpty).toBe(false)
+    expect(songStore.dirty).toBe(true) // lyrics 在 DIRTY_FIELDS → 复用既有保存链路
+    expect(songStore.onlineLyricFetching).toBe(false)
+  })
+
+  it('取词为空 → 移除该条候选、保留用户已有歌词并提示换一条', async () => {
+    songStore.current!.lyrics = '[00:00.00]原歌词'
+    await searchOnlineLyrics(async () => [
+      onlineCand(),
+      onlineCand({ provider: 'rangotec', id: '446826' }),
+    ])
+
+    await pickOnlineLyric(onlineCand(), async () => null)
+
+    expect(songStore.onlineLyricCandidates.map((c) => c.id)).toEqual(['446826'])
+    expect(songStore.current!.lyrics).toBe('[00:00.00]原歌词')
+    expect(songStore.onlineLyricError).toBe('该候选取词为空，可换一条或手动粘贴')
+    expect(songStore.onlineLyricProvider).toBeNull()
+  })
+
+  it('取词抛错 → 提示可换一条，不清空已有歌词', async () => {
+    songStore.current!.lyrics = '[00:00.00]原歌词'
+
+    await pickOnlineLyric(onlineCand(), async () => { throw new Error('网络失败') })
+
+    expect(songStore.onlineLyricError).toBe('取词失败，可换一条或手动粘贴')
+    expect(songStore.current!.lyrics).toBe('[00:00.00]原歌词')
+    expect(songStore.onlineLyricFetching).toBe(false)
+  })
+
+  it('取词中重复点选 → 并发守卫只发一次请求', async () => {
+    let resolveFetch!: (text: string) => void
+    const fetchOnline = vi.fn(
+      () => new Promise<string>((resolve) => { resolveFetch = resolve }),
+    )
+
+    const first = pickOnlineLyric(onlineCand(), fetchOnline)
+    await pickOnlineLyric(onlineCand(), fetchOnline)
+    expect(fetchOnline).toHaveBeenCalledTimes(1)
+
+    resolveFetch('[00:00.00]词')
+    await first
+    expect(songStore.current!.lyrics).toBe('[00:00.00]词')
   })
 })

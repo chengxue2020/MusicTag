@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 // mock ../api/search → LyricPanel 经 store 动作（manualSearch/pickLyricCandidate）的默认注入兜底
 // （api/client.ts 必须保留 `import { invoke } from '@tauri-apps/api/core'`，改源失效）。
-const { mockSearchSongs, mockFetchLyric, mockSearchSource } = vi.hoisted(() => ({
+const { mockSearchSongs, mockFetchLyric, mockSearchSource, mockSearchLyrics, mockFetchOnlineLyric } = vi.hoisted(() => ({
   mockSearchSongs: vi.fn(async () => ({
     songs: [],
     source_stats: [
@@ -17,6 +17,9 @@ const { mockSearchSongs, mockFetchLyric, mockSearchSource } = vi.hoisted(() => (
   })),
   mockFetchLyric: vi.fn(async () => null),
   mockSearchSource: vi.fn(async () => []),
+  // 显式放宽返回类型，便于用例里注入带 provider/id 的候选与 LRC 文本。
+  mockSearchLyrics: vi.fn(async (): Promise<unknown[]> => []),
+  mockFetchOnlineLyric: vi.fn(async (): Promise<string | null> => null),
 }))
 vi.mock('../api/search', () => ({
   searchSongs: mockSearchSongs,
@@ -24,9 +27,11 @@ vi.mock('../api/search', () => ({
   fetchLyric: mockFetchLyric,
   downloadCover: vi.fn(async () => []),
   searchMetadataFallback: vi.fn(async () => []),
+  searchLyrics: mockSearchLyrics,
+  fetchOnlineLyric: mockFetchOnlineLyric,
 }))
 
-import type { Song, SongCandidate } from '../api/types'
+import type { LyricCandidate, Song, SongCandidate } from '../api/types'
 import { songStore } from '../store/song'
 import LyricPanel from './LyricPanel.vue'
 
@@ -74,6 +79,13 @@ function openSong(song: Song = makeSong()): void {
   songStore.searchedThisSong = false
   songStore.lyricSourcePlatform = null
   songStore.lyricFetchEmpty = false
+  // 在线搜词是独立状态机，openSong 也必须复位，否则新增用例会污染既有 32 个用例。
+  songStore.onlineLyricState = 'idle'
+  songStore.onlineLyricCandidates = []
+  songStore.onlineLyricSeq = 0
+  songStore.onlineLyricFetching = false
+  songStore.onlineLyricError = ''
+  songStore.onlineLyricProvider = null
 }
 
 describe('LyricPanel — 来源 badge 三态（design.md D8 文案定稿）', () => {
@@ -447,5 +459,126 @@ describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(songStore.lyricSearchState).toBe('done')
     expect(mockSearchSongs).not.toHaveBeenCalled()
     expect(w.find('.cand-list').exists()).toBe(true) // v-show 保留 DOM，仅 display:none
+  })
+})
+
+describe('LyricPanel — 在线搜词独立入口（online-lyrics-sources）', () => {
+  const onlineCand = (over: Partial<LyricCandidate> = {}): LyricCandidate => ({
+    provider: 'qianqian',
+    id: '48734',
+    title: '可能',
+    artist: '程响',
+    album: '',
+    score: 0.9,
+    ...over,
+  })
+
+  beforeEach(() => {
+    openSong()
+    mockSearchSongs.mockClear()
+    mockSearchLyrics.mockReset()
+    mockSearchLyrics.mockResolvedValue([])
+    mockFetchOnlineLyric.mockReset()
+    mockFetchOnlineLyric.mockResolvedValue(null)
+  })
+
+  it('两个手动按钮并存；idle 时不渲染在线候选区', () => {
+    const w = mount(LyricPanel)
+    const triggers = w.findAll('.search-actions .search-trigger')
+    expect(triggers).toHaveLength(2)
+    expect(triggers[0].text()).toBe('🔍 搜索歌词')
+    expect(triggers[1].text()).toBe('🌐 在线搜词')
+    expect(w.find('.online-wrap').exists()).toBe(false)
+  })
+
+  it('点「在线搜词」→ 走独立 searchLyrics，不触发五源主搜索', async () => {
+    mockSearchLyrics.mockResolvedValueOnce([onlineCand()])
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+
+    expect(mockSearchLyrics).toHaveBeenCalledWith('歌名', '作者')
+    expect(mockSearchSongs).not.toHaveBeenCalled()
+    expect(songStore.lyricSearchState).toBe('idle')
+    expect(songStore.isOffline).toBe(false)
+    expect(w.find('.online-head').text()).toBe('在线歌词 · 千千 Plus / Rangotec')
+    expect(w.findAll('.online-wrap .online-cand-row')).toHaveLength(1)
+  })
+
+  it('候选条显示 provider 标签；点选后填入歌词框且 badge 显示在线来源', async () => {
+    mockSearchLyrics.mockResolvedValueOnce([
+      onlineCand(),
+      onlineCand({ provider: 'rangotec', id: '446826' }),
+    ])
+    mockFetchOnlineLyric.mockResolvedValueOnce('[00:10.12]可能南方的阳光\n')
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+    const rows = w.findAll('.online-wrap .online-cand-row')
+    expect(rows).toHaveLength(2)
+    expect(w.findAll('.online-wrap .src-tag').map((n) => n.text())).toEqual([
+      '千千 Plus',
+      'Rangotec',
+    ])
+
+    await rows[0].trigger('click')
+    await flushPromises()
+
+    expect(mockFetchOnlineLyric).toHaveBeenCalledWith('qianqian', '48734')
+    expect((w.find('.lyrics-box').element as HTMLTextAreaElement).value).toBe(
+      '[00:10.12]可能南方的阳光\n',
+    )
+    expect(w.find('.badge').text()).toBe('来源: 千千 Plus')
+    expect(songStore.lyricSourcePlatform).toBeNull()
+  })
+
+  it('搜索中显示「搜索中…」且在线按钮禁用（防连点）', async () => {
+    let resolveSearch!: (list: LyricCandidate[]) => void
+    mockSearchLyrics.mockImplementationOnce(
+      () => new Promise<LyricCandidate[]>((resolve) => { resolveSearch = resolve }),
+    )
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+
+    expect(w.find('.online-wrap .cand-status').text()).toContain('搜索中…')
+    expect((w.find('.online-trigger').element as HTMLButtonElement).disabled).toBe(true)
+
+    resolveSearch([])
+    await flushPromises()
+    expect((w.find('.online-trigger').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('无结果 → 在线区给出提示，主候选区与离线状态不受影响', async () => {
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+
+    expect(w.find('.online-error').text()).toBe('未找到匹配的在线歌词，可手动粘贴')
+    expect(w.find('.online-wrap .cand-empty').exists()).toBe(false)
+    expect(songStore.lyricSearchState).toBe('idle')
+    expect(songStore.isOffline).toBe(false)
+  })
+
+  it('在线候选区独立于主候选折叠按钮：折叠主区不影响在线区', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    mockSearchLyrics.mockResolvedValueOnce([onlineCand()])
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+    expect(w.find('.cand-wrap .cand-list').exists()).toBe(true)
+    expect(w.find('.online-wrap .cand-list').exists()).toBe(true)
+
+    await w.find('.cand-toggle').trigger('click')
+    // happy-dom 不计算样式，直接读 v-show 写入的 .cand-wrap 内联 display。
+    expect((w.find('.cand-wrap').element as HTMLElement).style.display).toBe('none')
+    expect(w.find('.online-wrap .cand-list').exists()).toBe(true)
+    expect(w.findAll('.online-wrap .online-cand-row')).toHaveLength(1)
   })
 })

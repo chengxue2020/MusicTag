@@ -8,6 +8,20 @@ export type MusicSourceId = 'netease' | 'qqmusic' | 'kugou' | 'lrclib' | 'itunes
 /** 歌词来源：内嵌 / 同名单曲 lrc / 无 */
 export type LyricsSource = 'embedded' | 'sidecar' | 'none'
 
+/** 在线歌词来源（独立在线搜词链路；不进 MusicSourceId 主搜索，两源无完整元信息）。 */
+export type LyricsProvider = 'qianqian' | 'rangotec'
+
+/** 在线歌词候选（search_lyrics 返回，与 Rust LyricCandidate 对齐）。
+ *  惰性拉取：候选只带身份与匹配度，LRC 正文点选后才 fetch_online_lyric。 */
+export interface LyricCandidate {
+  provider: LyricsProvider
+  id: string
+  title: string
+  artist: string
+  album: string
+  score: number
+}
+
 /** 查漏扫描维度（与 Rust MissingField 的 snake_case serde 名称一致）。
  *  业务顺序固定 title → artist → album → cover → lyrics → year；year 追加在末尾。 */
 export type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics' | 'year'

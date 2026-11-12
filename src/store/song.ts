@@ -10,7 +10,9 @@ import { listSongs as defaultListSongs, listenFolderChanged as defaultListenFold
 
 import { downloadCover as defaultDownloadCover } from '../api/search'
 import { fetchLyric as defaultFetchLyric } from '../api/search'
+import { fetchOnlineLyric as defaultFetchOnlineLyric } from '../api/search'
 import { searchMetadataFallback as defaultMetadataFallback } from '../api/search'
+import { searchLyrics as defaultSearchLyrics } from '../api/search'
 import { searchSongs as defaultSearchSongs } from '../api/search'
 import { searchSource as defaultSearchSource } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
@@ -20,6 +22,8 @@ import { scanMissing as defaultScanMissing } from '../api/songs'
 import type {
   CoverInput,
   FolderChanged,
+  LyricCandidate,
+  LyricsProvider,
   LyricsSource,
   MetadataCandidate,
   MissingField,
@@ -192,6 +196,19 @@ interface SongEditor {
   lastSearchAllFailed: boolean | null
   /** 派生：是否显示「补全年份」按钮（#17 ② 或「A 未跑、点后先补跑 A」+ 年份为空 + 非只读）。 */
   needYearFallback: boolean
+  /** 在线搜词态（online-lyrics-sources）：**独立状态机**，与 lyricSearchState / 五源主搜索互不干扰。
+   *  仅由歌词面板「在线搜词」按钮手动触发，不自动搜、不改 isOffline / all_failed。 */
+  onlineLyricState: SearchState
+  /** 在线歌词候选（两源并发结果，已按标题相关性过滤；切歌即弃、不落盘）。 */
+  onlineLyricCandidates: LyricCandidate[]
+  /** 在线搜词过期序号（切歌 / 重搜作废在途结果，同 D2.6）。 */
+  onlineLyricSeq: number
+  /** 点选候选后正在取正文（防连点并发）。 */
+  onlineLyricFetching: boolean
+  /** 在线搜词 / 取词失败或空结果提示（歌词面板空态文案）。 */
+  onlineLyricError: string
+  /** 点选在线歌词后的来源 badge（在线源不属于 MusicSourceId，故独立于 lyricSourcePlatform）。 */
+  onlineLyricProvider: LyricsProvider | null
 }
 
 /**
@@ -647,6 +664,12 @@ const raw = reactive<SongEditor>({
   metadataSearchState: 'idle',
   metadataSearchSeq: 0,
   lastSearchAllFailed: null,
+  onlineLyricState: 'idle',
+  onlineLyricCandidates: [],
+  onlineLyricSeq: 0,
+  onlineLyricFetching: false,
+  onlineLyricError: '',
+  onlineLyricProvider: null,
 })
 
 function resetMissingFilterState(): void {
@@ -803,6 +826,14 @@ function resetSearchState(): void {
   raw.metadataSearchState = 'idle'
   raw.metadataSearchSeq++
   raw.lastSearchAllFailed = null
+  // 在线搜词候选生命周期同样是「当前歌曲」：清候选、归 idle、自增序号作废在途请求。
+  // 只动在线状态机，不触碰 lyricSearchState / coverSearchState / C2 链。
+  raw.onlineLyricState = 'idle'
+  raw.onlineLyricCandidates = []
+  raw.onlineLyricSeq++
+  raw.onlineLyricFetching = false
+  raw.onlineLyricError = ''
+  raw.onlineLyricProvider = null
 }
 
 /**
@@ -1174,6 +1205,7 @@ export async function undo(): Promise<void> {
   raw.renameRejected = false
   // D5：badge 回到 original 的来源（候选保留——仍是当前歌，可重选）
   raw.lyricSourcePlatform = null
+  raw.onlineLyricProvider = null
   raw.lyricFetchEmpty = false
 }
 
@@ -1207,6 +1239,80 @@ export function clearCover(): void {
   if (raw.readonly || raw.current === null) return
   raw.current.cover = null
   raw.current.cover_mime = null
+}
+
+/**
+ * 独立「在线搜词」（online-lyrics-sources）：两源（千千 Plus / Rangotec）并发只查歌词。
+ *
+ * **不进主搜索**：不调用 searchSongs、不读/写 lastSearchAllFailed、不置 isOffline、
+ * 不动 lyricCandidates / coverCandidates / C2 链；只维护自己的 onlineLyricState 状态机。
+ * 用户手动点按钮才发起；空 title 与 artist 都不发请求（后端也会守卫空 title）。
+ * `onlineLyricSeq` 过期守卫：切歌或重复点击后旧响应 resolve 时丢弃；失败降级空态，
+ * 不标会话离线（同 manualSearch 的手动语义）。候选不落盘、切歌即弃。
+ * IPC 依赖以 `searchLyrics` 注入（默认 api/search.ts，测试可注入桩）。
+ */
+export async function searchOnlineLyrics(
+  searchLyrics: (title: string, artist: string) => Promise<LyricCandidate[]> = defaultSearchLyrics,
+): Promise<void> {
+  const cur = raw.current
+  if (cur === null || raw.readonly) return
+  if (cur.title.trim() === '' && cur.artist.trim() === '') return
+  const mySeq = ++raw.onlineLyricSeq
+  raw.onlineLyricState = 'searching'
+  raw.onlineLyricCandidates = []
+  raw.onlineLyricError = ''
+  try {
+    const list = await searchLyrics(cur.title, cur.artist)
+    if (raw.onlineLyricSeq !== mySeq) return // 已切歌 / 被新搜索作废
+    raw.onlineLyricCandidates = list
+    raw.onlineLyricState = 'done'
+    if (list.length === 0) raw.onlineLyricError = '未找到匹配的在线歌词，可手动粘贴'
+  } catch {
+    if (raw.onlineLyricSeq !== mySeq) return
+    raw.onlineLyricCandidates = []
+    raw.onlineLyricState = 'done'
+    raw.onlineLyricError = '在线歌词服务不可用，可手动粘贴'
+  }
+}
+
+/**
+ * 点选在线歌词候选 → 按 provider + id 拉清洗后的 LRC 正文 → 填入 `current.lyrics`。
+ *
+ * 写入表单后即复用既有链路：lyrics 在 DIRTY_FIELDS → dirty 自动翻转；
+ * 保存 / 「同时保存为 .lrc」仍走 save_song。badge 用 onlineLyricProvider
+ * （在线源不属于 MusicSourceId，不写 lyricSourcePlatform，避免污染 C2 平台语义）。
+ * 取词为空 / 失败 → 提示并**移除该条候选**（方便换一条），不清空用户已有歌词。
+ * `onlineLyricSeq` 过期守卫 + onlineLyricFetching 并发守卫。
+ */
+export async function pickOnlineLyric(
+  cand: LyricCandidate,
+  fetchOnlineLyric: (provider: LyricsProvider, id: string) => Promise<string | null> = defaultFetchOnlineLyric,
+): Promise<void> {
+  if (raw.readonly || raw.current === null || raw.onlineLyricFetching) return
+  const mySeq = raw.onlineLyricSeq
+  raw.onlineLyricFetching = true
+  raw.onlineLyricError = ''
+  try {
+    const text = await fetchOnlineLyric(cand.provider, cand.id)
+    if (raw.onlineLyricSeq !== mySeq) return
+    if (text === null || text === undefined || text.trim() === '') {
+      raw.onlineLyricCandidates = raw.onlineLyricCandidates.filter(
+        (c) => !(c.provider === cand.provider && c.id === cand.id),
+      )
+      raw.onlineLyricError = '该候选取词为空，可换一条或手动粘贴'
+      return
+    }
+    raw.current.lyrics = text
+    raw.onlineLyricProvider = cand.provider
+    raw.lyricSourcePlatform = null
+    raw.lyricFetchEmpty = false
+    raw.onlineLyricError = ''
+  } catch {
+    if (raw.onlineLyricSeq !== mySeq) return
+    raw.onlineLyricError = '取词失败，可换一条或手动粘贴'
+  } finally {
+    raw.onlineLyricFetching = false
+  }
 }
 
 /** 只读封装 store（避免组件直接改整个对象；字段仍可单独赋值）。 */

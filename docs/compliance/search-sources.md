@@ -1,6 +1,6 @@
-# 搜索源合规记录（网易云 / QQ 音乐 / 酷狗 / LRCLIB / iTunes）
+# 搜索源合规记录（网易云 / QQ 音乐 / 酷狗 / LRCLIB / iTunes + 独立在线歌词源）
 
-> 本文档按 compliance-disclosure「逐源合规记录」要求，逐一记录五个歌词/封面搜索源的接口调用方式、
+> 本文档按 compliance-disclosure「逐源合规记录」要求，逐一记录五个歌词/封面搜索源（另在末节单独记录「在线搜词」的两个纯歌词源）的接口调用方式、
 > 发送字段、返回内容用途边界、公开条款或接口文档链接与当前处理决定（Issue #166）。
 
 ## 记录口径（先读）
@@ -82,6 +82,22 @@
 | 公开条款或接口文档链接 | Deezer https://developers.deezer.com/api ；MusicBrainz https://musicbrainz.org/doc/Development/XML_Web_Service/Version_2 （限流要求见 https://musicbrainz.org/doc/Development/Rate_Limiting ）；QQ / iTunes 条款同上文对应章节 |
 | 核实状态 | 公开资料整理（Deezer 搜索与 MusicBrainz Web Service 为公开发布接口；QQ 联想/单曲详情为 web 端公开行为，无官方接口文档） |
 | 当前处理决定 | 仅用于元数据检索；不下载音频；低频手动触发降低风控暴露；平台接口使用授权确认并入「未决事项」#3 |
+
+## 独立在线歌词源（online-lyrics-sources，用户手动触发）
+
+> 这两个源**只返回歌词**，没有封面 / 发行年份 / 流派 / 音轨等元信息，因此按产品决策**不并入主搜索的五源并发链**，做成歌词面板「在线搜词」独立入口：不参与自动搜索、不计入 `source_stats` / `all_failed`、不进 C2 换源链。仅由用户手动点击触发，只发送歌曲标题与歌手两个文本查询词，不发送专辑名、本地音频内容或本地文件路径；候选不落盘、切歌即弃，点选后才拉取歌词正文，保存仍走既有 `save_song` / `.lrc` 侧载链路。
+
+| 项 | 千千 Plus | Rangotec |
+|---|---|---|
+| 接口域名与调用方式 | `lyrics.qianqian.plus`，单端点双 action：搜索 `GET https://lyrics.qianqian.plus/api/search/?sh&Title=<...>&Artist=<...>`（返回 `<result><lrc id artist title/></result>` XML）；取词 `GET ?dl&Id=<id>`（返回纯文本 LRC）。响应头 `X-Lyric-Encoding: utf-8 \| gbk`、`X-Lyric-Provider` | 搜索 `GET https://tools.rangotec.com/api/anon/lrc?title=<...>&artist=<...>&od=asc`（公开 JSON API，UTF-8）；取词走老协议兼容端点 `GET /qianqian?dl?Id=<id>&Code=abc`。同源备用域名 `yun.rangotec.com:86`（HTTP，实测可用；生产代码未使用，全部走 HTTPS） |
+| 发送字段 | 歌曲标题、歌手（文本查询词）；取词仅发候选 id | 歌曲标题、歌手、`od=asc` 排序参数；取词仅发候选 id 与固定 `Code` |
+| 返回内容用途 | 候选仅展示歌名 / 歌手；点选后取 LRC 文本填入歌词区，保存时嵌入本地文件 / 可导出 `.lrc`。**不下载音频、不取封面** | 同左；JSON 响应里虽含 `lrc` 全文，但按惰性拉取约定不随 IPC 带出，点选后才按 id 取词 |
+| 已知限制与清洗 | 中文参数常返回 UTF-8，纯 ASCII 参数可能返回 `charset=GBK` / XML 声明 `GB2312`，LRC 正文混用 UTF-8 与 GBK → 按响应头 / XML 声明用 `encoding_rs` 解码，缺声明时严格 UTF-8 探测再回退 GBK。无结果时仍返回一批不相关热门候选 → 由本地标题相关性打分剔除。**用户明确要求去掉 LRC 开头的 `[by:QianQian.Plus]` 署名与「本歌词由 QianQian.Plus 提供。」/「来源于网络，版权归原作者及版权方所有。」版权声明** | HTTP 200 但 `code=400` 表示无结果 / 错误，必须判业务码；`od=asc` 取老数据（标准 `[mm:ss.xx]`），`od=desc` / 默认优先最新 UGC，多为增强型双时间戳 `[00:00:820,00:04:100]` 并夹带版权警示、翻唱广告 → 时间戳转标准 `[mm:ss.xx]`、广告 / 版权行过滤。单 IP 1 秒 100 次限流、凌晨 1–5 点可能关服务、对特殊字符过滤严格 → 查询词先清洗 |
+| 公开条款或接口文档链接 | 服务状态页 https://lyrics.qianqian.plus/api/search/ （自称「千千静听歌词服务器」；无官方接口文档或授权协议） | 作者公开说明 / 文档见 https://tools.rangotec.com/ 与 `yun.rangotec.com:86/qianqian`（作者自述「其他歌词插件可用时优先使用其他歌词插件」；无官方授权协议） |
+| 核实状态 | 公开资料整理（web 公开接口行为实测，无官方书面授权） | 公开资料整理（作者公开的匿名 API，无官方书面授权） |
+| 当前处理决定 | 仅用于手动歌词检索；不下载音频；水印按用户要求剥离；接口使用授权确认并入「未决事项」#3 | 仅用于手动歌词检索；不下载音频；低频手动触发、两源合计每次最多一次请求 / 源；接口使用授权确认并入「未决事项」#3 |
+
+> 版权提示：两个源的歌词文本版权归原作者及版权方所有，本软件只做检索与本地文件标签编辑，不提供音频文件、不批量抓取、不转售歌词内容。剥离署名是按用户要求做的显示层清洗，**不改变歌词本身的版权归属**；合规结论以法律顾问审阅为准。
 
 ## 第三方依赖与素材归属清单
 

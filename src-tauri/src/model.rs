@@ -169,6 +169,36 @@ pub struct MetadataCandidate {
     pub score: f32,
 }
 
+/// 在线歌词来源（online-lyrics-sources：独立在线搜词链路）。
+///
+/// **刻意不进 `MusicSourceId`**：这两个源只返回歌词，没有封面 / 年份 / 流派 / 音轨等
+/// 元信息，无法参与 `search_song` 的候选打分聚合。若塞进五源枚举会污染来源序、
+/// `source_stats` 与 `all_failed` 语义（也让 C2 换源链误以为它们能出 SongCandidate）。
+/// 因此单独定义枚举，仅服务 `search_lyrics` / `fetch_online_lyric` 两个独立 command。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LyricsProvider {
+    /// 千千静听歌词服务器（千千 Plus）：`https://lyrics.qianqian.plus/api/search/`
+    Qianqian,
+    /// Rangotec 歌词服务：`https://tools.rangotec.com/api/anon/lrc`
+    Rangotec,
+}
+
+/// 在线歌词候选（`search_lyrics` 返回，契约与 `SongCandidate` 分离）。
+///
+/// 惰性拉取：搜索只返回身份与匹配度，LRC 正文点选后才经 `fetch_online_lyric` 拉取；
+/// 候选不落盘、切歌即弃，点选后填入 `Song.lyrics`，写盘仍走既有 `save_song` / `.lrc` 链路。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LyricCandidate {
+    pub provider: LyricsProvider,
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// 归一化 title/artist 匹配度（复用 `searcher::title_match` / `artist_match` 权重）。
+    pub score: f32,
+}
+
 /// 五源并发搜索结果（design.md §10.3 契约，v1-search-backend / v1-search-fixes / search-sources-renewal）。
 ///
 /// `source_stats` 元组序列化为 `[source, count]` 数组，对齐 TS

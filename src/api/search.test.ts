@@ -8,8 +8,16 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import type { MetadataCandidate, SearchResult, SongCandidate } from './types'
-import { downloadCover, fetchLyric, searchMetadataFallback, searchSongs, searchSource } from './search'
+import type { LyricCandidate, MetadataCandidate, SearchResult, SongCandidate } from './types'
+import {
+  downloadCover,
+  fetchLyric,
+  fetchOnlineLyric,
+  searchLyrics,
+  searchMetadataFallback,
+  searchSongs,
+  searchSource,
+} from './search'
 
 const searchResult: SearchResult = {
   songs: [
@@ -105,5 +113,28 @@ describe('api/search.ts — 类型化 command 封装（命令名/参数逐字对
     expect(mockInvoke).toHaveBeenCalledWith('search_metadata_fallback', {
       title: '歌名', artist: '作者', album: '专辑',
     })
+  })
+
+  // online-lyrics-sources：两个独立歌词 command，只查歌词，不带封面/年份等元信息，
+  // 不经过 search_song 五源聚合链（产品约束：不进主搜索）。
+  it('searchLyrics：透传 search_lyrics + { title, artist }，返回带 provider 的独立歌词候选', async () => {
+    const candidates: LyricCandidate[] = [
+      { provider: 'qianqian', id: '48734', title: '可能', artist: '程响', album: '', score: 0.9 },
+      { provider: 'rangotec', id: '446826', title: '可能', artist: '程响', album: '', score: 0.9 },
+    ]
+    mockInvoke.mockResolvedValue(candidates)
+    await expect(searchLyrics('可能', '程响')).resolves.toEqual(candidates)
+    expect(mockInvoke).toHaveBeenCalledWith('search_lyrics', { title: '可能', artist: '程响' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('search_song', expect.anything())
+  })
+
+  it('fetchOnlineLyric：透传 fetch_online_lyric + { provider, id }；None 返回 null', async () => {
+    mockInvoke.mockResolvedValue('[00:10.12]可能南方的阳光\n')
+    await expect(fetchOnlineLyric('qianqian', '48734')).resolves.toBe('[00:10.12]可能南方的阳光\n')
+    expect(mockInvoke).toHaveBeenCalledWith('fetch_online_lyric', { provider: 'qianqian', id: '48734' })
+
+    mockInvoke.mockResolvedValue(null)
+    await expect(fetchOnlineLyric('rangotec', '446826')).resolves.toBeNull()
+    expect(mockInvoke).toHaveBeenCalledWith('fetch_online_lyric', { provider: 'rangotec', id: '446826' })
   })
 })

@@ -37,6 +37,8 @@ pub fn run() {
             commands::search::fetch_lyric,
             commands::search::download_cover,
             commands::search::search_metadata_fallback,
+            commands::search::search_lyrics,
+            commands::search::fetch_online_lyric,
             commands::update::check_for_update,
             commands::update::open_release_page,
             commands::update::get_last_update_check_at,
