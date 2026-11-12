@@ -428,14 +428,15 @@ fn is_watermark(line: &str) -> bool {
 }
 
 /// LRC 清洗（两源共用）：统一换行 → 去空元信息标签 → 去署名/版权/广告行 →
-/// 增强型时间戳转标准 → 去首尾空行 → 以单个换行结尾。空结果返回空串（前端按取词失败处理）。
+/// 增强型时间戳转标准 → 去掉空行（含删水印后残留的孤立空行）→ 以单个换行结尾。
+/// 空结果返回空串（前端按取词失败处理）。
 pub fn clean_lrc(text: &str) -> String {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut kept: Vec<String> = Vec::new();
     for line in normalized.split('\n') {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            kept.push(String::new());
+            // 水印/空元信息行被删除后常留下孤立空行，一并去掉（歌词正文保持紧凑）。
             continue;
         }
         if EMPTY_META_TAGS
@@ -448,12 +449,6 @@ pub fn clean_lrc(text: &str) -> String {
             continue;
         }
         kept.push(normalize_enhanced_timestamps(trimmed));
-    }
-    while matches!(kept.first(), Some(s) if s.is_empty()) {
-        kept.remove(0);
-    }
-    while matches!(kept.last(), Some(s) if s.is_empty()) {
-        kept.pop();
     }
     if kept.is_empty() {
         return String::new();
@@ -560,9 +555,13 @@ pub async fn search_lyrics(
         return Vec::new();
     }
     let a = sanitize_query(artist);
+    // `search(&self, ...)` 的 future 借用 provider；join! 里不能直接用临时对象，
+    // 否则临时值会在 await 完成前被释放（E0716），必须用 let 绑定延长生命周期。
+    let qianqian_source = Qianqian::default();
+    let rangotec_source = Rangotec::default();
     let (qianqian, rangotec) = tokio::join!(
-        Qianqian::default().search(client, &t, &a),
-        Rangotec::default().search(client, &t, &a),
+        qianqian_source.search(client, &t, &a),
+        rangotec_source.search(client, &t, &a),
     );
     let mut out = rank_candidates(qianqian, &t, &a, LyricsProvider::Qianqian, PER_PROVIDER_TOP);
     out.extend(rank_candidates(
@@ -586,9 +585,11 @@ pub async fn fetch_online_lyric(
     if id.is_empty() {
         return None;
     }
+    let qianqian_source = Qianqian::default();
+    let rangotec_source = Rangotec::default();
     let raw = match provider {
-        LyricsProvider::Qianqian => Qianqian::default().fetch(client, id).await,
-        LyricsProvider::Rangotec => Rangotec::default().fetch(client, id).await,
+        LyricsProvider::Qianqian => qianqian_source.fetch(client, id).await,
+        LyricsProvider::Rangotec => rangotec_source.fetch(client, id).await,
     }?;
     let cleaned = clean_lrc(&raw);
     if cleaned.trim().is_empty() {

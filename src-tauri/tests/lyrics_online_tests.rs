@@ -238,7 +238,7 @@ fn lyrics_provider_and_candidate_serialize_to_contract_shape() {
 async fn qianqian_search_uses_bare_action_and_percent_encoded_params() {
     let response = http_response(
         "Content-Type: text/xml; charset=UTF-8",
-        br#"<?xml version="1.0" encoding="UTF-8"?><result><lrc id="48734" artist="程响" title="可能"/></result>"#,
+        r#"<?xml version="1.0" encoding="UTF-8"?><result><lrc id="48734" artist="程响" title="可能"/></result>"#.as_bytes(),
     );
     let (url, captured) = mock_http_capture(response);
     let source = Qianqian { base_url: url.clone() };
@@ -270,7 +270,7 @@ async fn qianqian_fetch_decodes_gbk_via_lyric_encoding_header() {
 async fn rangotec_search_uses_public_json_api_with_asc_order() {
     let response = http_response(
         "Content-Type: application/json",
-        br#"{"code":200,"data":[{"id":446826,"artist":"程响","title":"可能","album":"","lrc":"[00:00.00]x"}]}"#,
+        r#"{"code":200,"data":[{"id":446826,"artist":"程响","title":"可能","album":"","lrc":"[00:00.00]x"}]}"#.as_bytes(),
     );
     let (url, captured) = mock_http_capture(response);
     let source = Rangotec {
