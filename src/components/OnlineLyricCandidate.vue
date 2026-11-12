@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 在线歌词候选条（online-lyrics-sources）：来源标签（千千 Plus / Rangotec）+ 歌名 — 作者 + 专辑。
+// 在线歌词候选条（online-lyrics-sources）：来源标签（千千 Plus / Rangotec）+ 歌名 — 歌手。
+// 两源显示格式统一：不渲染专辑名、匹配度、id 等其他信息；artist 为空时只显示歌名（后面留空）。
 // 与主搜索的 LyricCandidate.vue 分开：在线源不属于 MusicSourceId，不参与 C2 换源，
 // 点击 → store.pickOnlineLyric（点选才 fetch_online_lyric 拉正文，惰性拉取）。
-// 上游 artist 可能为空（Rangotec UGC），此时只显示歌名，不留下悬空的 " — "。
 import { computed } from 'vue'
 import type { LyricCandidate } from '../api/types'
 import { lyricsProviderLabel } from '../store/selectors'
@@ -16,22 +16,18 @@ const props = defineProps<{
 const label = computed(() =>
   props.cand.artist ? `${props.cand.title} — ${props.cand.artist}` : props.cand.title,
 )
-const tooltip = computed(() =>
-  props.cand.album ? `${label.value} · ${props.cand.album}` : label.value,
-)
 </script>
 
 <template>
   <button
     type="button"
     class="online-cand-row"
-    :title="tooltip"
+    :title="label"
     :disabled="disabled"
     @click="pickOnlineLyric(cand)"
   >
     <span class="src-tag">{{ lyricsProviderLabel(cand.provider) }}</span>
     <span class="cand-text">{{ label }}</span>
-    <span v-if="cand.album" class="cand-album">{{ cand.album }}</span>
   </button>
 </template>
 
@@ -82,15 +78,5 @@ const tooltip = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.cand-album {
-  flex: 0 1 30%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10.5px;
-  color: var(--text-dim);
 }
 </style>

@@ -38,3 +38,14 @@
 - [x] 5.3 `components/OnlineLyricCandidate.vue`：artist 为空时只显示歌名，不拼接悬空 ` — `，tooltip 与可见文案一致。
 - [x] 5.4 回归测试：`src-tauri/tests/lyrics_online_tests.rs` 增占位字段清洗 / 身份去重 / 千千 Plus 不受影响三例；`src/components/lyric-panel.test.ts` 增候选条渲染一例。
 - [x] 5.5 同步 `design.md` D3、`spec.md` 新增 Requirement、`docs/compliance/search-sources.md` Rangotec 已知限制栏、`README.md` v0.2.4 更新说明。
+
+## G6 在线候选显示格式统一（用户要求「和千千 Plus 相同」）
+
+> 现状确认：两源共用 `OnlineLyricCandidate.vue`，但千千 Plus 的 XML 解析把 `album` 恒写为空串，
+> Rangotec 的 JSON 带 `album` → 只有 Rangotec 会多出右侧专辑列，tooltip 也会追加 ` · 专辑`。
+> 用户要求：统一为「歌曲名 - 歌手」，无歌手则后面留空，不显示专辑名等其他信息。
+
+- [x] 6.1 `OnlineLyricCandidate.vue` 移除 `cand-album` 渲染与 `.cand-album` 样式，tooltip 改为与可见文案一致；只保留「来源标签 + 歌名 — 歌手」，artist 为空只显示歌名。
+- [x] 6.2 `src/components/lyric-panel.test.ts` 调整原 artist 为空用例的断言，新增「两源统一显示、不显示专辑」用例（含每条只有 2 个 span）。
+- [x] 6.3 同步 `design.md` D3、`spec.md` Requirement / Scenarios、`specs/search-ui/spec.md`、合规记录、`README.md` v0.2.4 说明。
+- [x] 6.4 `LyricCandidate.album` 契约字段保留（仍参与 Rangotec 身份去重），仅不用于展示，故 Rust / TS 契约与 command 数量不变。

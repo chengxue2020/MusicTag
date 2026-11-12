@@ -599,7 +599,33 @@ describe('LyricPanel — 在线搜词独立入口（online-lyrics-sources）', (
     expect(rows[0].attributes('title')).toBe('可能')
     expect(rows[0].find('.cand-album').exists()).toBe(false)
     expect(rows[1].find('.cand-text').text()).toBe('可能 — 程响')
-    expect(rows[1].attributes('title')).toBe('可能 — 程响 · 单曲')
-    expect(rows[1].find('.cand-album').text()).toBe('单曲')
+    expect(rows[1].attributes('title')).toBe('可能 — 程响')
+    expect(rows[1].find('.cand-album').exists()).toBe(false)
+  })
+
+  it('两个来源统一显示「歌名 — 歌手」，不显示专辑名等其他信息', async () => {
+    mockSearchLyrics.mockResolvedValueOnce([
+      onlineCand({ provider: 'qianqian', id: '48734' }),
+      onlineCand({ provider: 'rangotec', id: '446826', album: '单曲' }),
+      onlineCand({ provider: 'rangotec', id: '446827', artist: '', album: '可能' }),
+    ])
+    const w = mount(LyricPanel)
+
+    await w.find('.online-trigger').trigger('click')
+    await flushPromises()
+
+    const rows = w.findAll('.online-wrap .online-cand-row')
+    expect(rows).toHaveLength(3)
+    // 每条只有「来源标签 + 歌名/歌手」两段；album 即便非空也不渲染，tooltip 与可见文案一致
+    for (const row of rows) {
+      expect(row.findAll('span')).toHaveLength(2)
+      expect(row.find('.cand-album').exists()).toBe(false)
+      expect(row.attributes('title')).toBe(row.find('.cand-text').text())
+    }
+    expect(rows.map((r) => r.find('.cand-text').text())).toEqual([
+      '可能 — 程响',
+      '可能 — 程响',
+      '可能',
+    ])
   })
 })
