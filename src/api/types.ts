@@ -23,7 +23,8 @@ export interface LyricCandidate {
 }
 
 /** 查漏扫描维度（与 Rust MissingField 的 snake_case serde 名称一致）。
- *  业务顺序固定 title → artist → album → cover → lyrics → year；year 追加在末尾。 */
+ *  业务顺序固定 title → artist → album → cover → lyrics → year；year 追加在末尾。
+ *  album 仅为契约兼容保留：前端「筛选缺失」面板不提供该勾选框，也不发送该维度。 */
 export type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics' | 'year'
 
 export interface MissingSong {

@@ -63,8 +63,12 @@ type SearchState = 'idle' | 'searching' | 'done'
 
 export type MissingScanState = 'idle' | 'scanning' | 'done' | 'error'
 
-/** 查漏维度固定顺序；`year` 追加在末尾，既有五维的顺序/索引保持不变。 */
-export const MISSING_FIELDS: MissingField[] = ['title', 'artist', 'album', 'cover', 'lyrics', 'year']
+/**
+ * 面板可勾选的查漏维度（固定顺序）；默认仍全选当前可勾选维度。
+ * 不提供「专辑」选择框：Rust `MissingField` 契约与 SongRow 的 badge 顺序保留 `album`，
+ * 但前端不再按专辑查漏，`normalizeMissingChecks` 会把传入的 album 过滤掉。
+ */
+export const MISSING_FIELDS: MissingField[] = ['title', 'artist', 'cover', 'lyrics', 'year']
 
 /** 候选是否带有任一可填的文本元数据（FR-8 #16）。 */
 function hasMetadata(c: SongCandidate): boolean {
@@ -118,7 +122,7 @@ interface SongEditor {
   searchQuery: string
   /** 是否启用查漏筛选；扫描中/命令失败时 selector 暂时保留完整列表。 */
   missingFilterEnabled: boolean
-  /** 查漏维度，始终按 title → artist → album → cover → lyrics → year 归一化。 */
+  /** 查漏维度，始终按 title → artist → cover → lyrics → year 归一化（默认全选）。 */
   missingChecks: MissingField[]
   /** 仅存储命中歌曲的缺失维度，不污染 SongSummary。 */
   missingByPath: Record<string, MissingField[]>
@@ -729,7 +733,7 @@ export async function scanMissing(
   }
 }
 
-/** 打开查漏面板：首次打开默认六维（含年份），并立即扫描。 */
+/** 打开查漏面板：首次打开默认全选可勾选维度（含年份），并立即扫描。 */
 export function openMissingFilter(
   scanFn: (dir: string, checks: MissingField[]) => Promise<MissingScanResult> = defaultScanMissing,
 ): Promise<void> {

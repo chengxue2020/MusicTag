@@ -7,16 +7,21 @@
 
 ### Requirement: 缺失维度选择
 
-筛选面板 SHALL 提供六个复选框：歌名（`title`）、歌手（`artist`）、专辑（`album`）、封面（`pictures`）、歌词和年份（`year`）。业务检查顺序固定为 `title → artist → album → cover → lyrics → year`，`year` 追加在末尾以保持既有五维顺序不变。面板默认全选；全不勾选 SHALL 视为未启用缺失筛选并显示完整歌曲列表。
+筛选面板 SHALL 提供五个复选框：歌名（`title`）、歌手（`artist`）、封面（`cover`）、歌词（`lyrics`）和年份（`year`），按 `title → artist → cover → lyrics → year` 固定顺序展示；面板默认全选。专辑（`album`）仍保留在 Rust `MissingField` 契约与 badge 顺序中，但面板 SHALL NOT 提供「专辑」复选框，前端 SHALL NOT 把 `album` 作为查漏维度发送给后端。全不勾选 SHALL 视为未启用缺失筛选并显示完整歌曲列表。
 
 #### Scenario: 默认全选
 
 - **WHEN** 用户打开一个文件夹并首次打开缺失筛选面板
-- **THEN** 六个维度均为选中状态（含年份），列表显示缺少任一维度的歌曲
+- **THEN** 五个维度均为选中状态（含年份），列表显示缺少任一所选维度的歌曲
+
+#### Scenario: 不提供专辑选择框
+
+- **WHEN** 用户打开缺失筛选面板
+- **THEN** 面板只渲染五个复选框且不出现「专辑」，`album` 不出现在发给后端的检查维度中
 
 #### Scenario: 全不勾选
 
-- **WHEN** 用户取消全部六个维度
+- **WHEN** 用户取消全部五个维度
 - **THEN** 缺失筛选关闭，列表恢复完整歌曲列表
 
 ### Requirement: 缺失判定与 OR 语义

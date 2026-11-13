@@ -28,6 +28,8 @@ function onKeydown(e: KeyboardEvent) {
   if (menuOpen.value && e.key === 'Tab') closeMenu(false)
 }
 
+// album 仅为兼容 Rust `MissingField` 契约保留标签定义；面板不提供「专辑」选择框，
+// 实际可勾选维度由 store 的 MISSING_FIELDS 决定（不含 album）。
 const missingLabels: Record<MissingField, string> = {
   title: '歌名',
   artist: '歌手',
@@ -178,6 +180,7 @@ onUnmounted(() => {
           <button class="missing-close-btn" type="button" @click="closeMissingFilter">关闭</button>
         </span>
       </div>
+      <!-- 五个可勾选维度，不含「专辑」；默认仍全选。 -->
       <label v-for="field in MISSING_FIELDS" :key="field" class="missing-check">
         <input
           type="checkbox"
