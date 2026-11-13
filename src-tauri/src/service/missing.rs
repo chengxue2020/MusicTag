@@ -13,7 +13,7 @@ use crate::service::reader;
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, ItemValue};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// 业务检查顺序固定；`Year` 追加在末尾，既有五维的顺序/索引保持不变。
@@ -26,12 +26,43 @@ const FIELD_ORDER: [MissingField; 6] = [
     MissingField::Year,
 ];
 
-/// 扫描目录中选定维度缺失的音频文件。
+/// 文件扫描线程的硬上限：即便机器有很多核，也最多同时开 4 个 worker。
+/// 目录遍历始终单线程，只有「逐文件解析标签」这一段并行，避免同时打开过多
+/// 音频文件把磁盘 I/O 与内存占满。
+pub const MAX_MISSING_SCAN_WORKERS: usize = 4;
+
+type ScanOutcome = Result<Option<MissingSong>, String>;
+
+/// 计算本次实际启用的 worker 数：固定上限、CPU 可用并行度、待扫描文件数三者取最小。
+/// 返回 0 或 1 时调用方直接走串行分支，不为小目录付出建线程的开销。
+pub fn missing_scan_worker_count(file_count: usize) -> usize {
+    let available = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1);
+    file_count.min(available).min(MAX_MISSING_SCAN_WORKERS)
+}
+
+/// 扫描目录中选定维度缺失的音频文件（自适应 worker 数）。
 ///
 /// `checks` 为空表示未启用筛选，直接返回空结果。目录遍历和单文件解析错误分别
 /// 以 command 可继续处理的 `errors` 返回；只有 worker 无法启动/汇合时才由 command
 /// 转成 command-level 错误。
+///
+/// 目录遍历保持串行以固定路径顺序，逐文件标签解析按 `missing_scan_worker_count`
+/// 得出的有限 worker 数并行；结果先按原下标归位再汇总，因此 `songs` / `errors`
+/// 的顺序与串行实现一致，用户看到的列表不会因为机器核数不同而变化。
 pub fn scan_missing(dir: &Path, checks: &[MissingField]) -> Result<MissingScanResult, String> {
+    scan_missing_with_workers(dir, checks, None)
+}
+
+/// 与 `scan_missing` 相同，但允许显式指定 worker 上限；`None` 表示按 CPU 可用
+/// 并行度与文件数自适应。`worker_limit` 仍会被 `MAX_MISSING_SCAN_WORKERS` 和
+/// 待扫描文件数夹住，调用方无法绕过资源上限。
+pub fn scan_missing_with_workers(
+    dir: &Path,
+    checks: &[MissingField],
+    worker_limit: Option<usize>,
+) -> Result<MissingScanResult, String> {
     if checks.is_empty() {
         return Ok(MissingScanResult {
             songs: Vec::new(),
@@ -48,16 +79,14 @@ pub fn scan_missing(dir: &Path, checks: &[MissingField]) -> Result<MissingScanRe
         .filter(|field| checks.contains(field))
         .collect();
 
-    let mut result = MissingScanResult {
-        songs: Vec::new(),
-        errors: Vec::new(),
-    };
-
+    // 只在这里遍历目录：并发遍历会放大随机 I/O，且让结果顺序不可预期。
+    let mut errors = Vec::new();
+    let mut paths: Vec<PathBuf> = Vec::new();
     for entry in WalkDir::new(dir).into_iter() {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                result.errors.push(MissingScanError {
+                errors.push(MissingScanError {
                     path: error
                         .path()
                         .map(|path| path.to_string_lossy().into_owned())
@@ -71,18 +100,70 @@ pub fn scan_missing(dir: &Path, checks: &[MissingField]) -> Result<MissingScanRe
         if !entry.file_type().is_file() || !is_audio_file(entry.path()) {
             continue;
         }
+        paths.push(entry.path().to_path_buf());
+    }
 
-        match scan_file(entry.path(), &selected) {
-            Ok(Some(song)) => result.songs.push(song),
+    let worker_count = worker_limit
+        .unwrap_or_else(|| missing_scan_worker_count(paths.len()))
+        .min(paths.len())
+        .min(MAX_MISSING_SCAN_WORKERS);
+    let outcomes: Vec<ScanOutcome> = if worker_count <= 1 {
+        // 空目录、单文件或单核：不建线程，直接复用串行的单文件判定。
+        paths
+            .iter()
+            .map(|path| scan_file(path, &selected))
+            .collect()
+    } else {
+        scan_files_in_parallel(&paths, &selected, worker_count)?
+    };
+
+    let mut songs = Vec::new();
+    for (path, outcome) in paths.iter().zip(outcomes) {
+        match outcome {
+            Ok(Some(song)) => songs.push(song),
             Ok(None) => {}
-            Err(reason) => result.errors.push(MissingScanError {
-                path: entry.path().to_string_lossy().into_owned(),
+            Err(reason) => errors.push(MissingScanError {
+                path: path.to_string_lossy().into_owned(),
                 reason,
             }),
         }
     }
 
-    Ok(result)
+    Ok(MissingScanResult { songs, errors })
+}
+
+/// 用固定数量的 worker 交错分摊文件解析（worker `i` 处理下标 `i, i+n, ...`），
+/// 让不同目录下耗时不同的文件更均衡。返回的 `ScanOutcome` 按输入下标排序，
+/// 与 `paths` 一一对应。零新增依赖，只借用 `std::thread::scope`。
+fn scan_files_in_parallel(
+    paths: &[PathBuf],
+    selected: &[MissingField],
+    worker_count: usize,
+) -> Result<Vec<ScanOutcome>, String> {
+    std::thread::scope(|scope| -> Result<Vec<ScanOutcome>, String> {
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker_index in 0..worker_count {
+            handles.push(scope.spawn(move || {
+                let mut partial = Vec::new();
+                let mut index = worker_index;
+                while index < paths.len() {
+                    partial.push((index, scan_file(paths[index].as_path(), selected)));
+                    index += worker_count;
+                }
+                partial
+            }));
+        }
+
+        let mut indexed: Vec<(usize, ScanOutcome)> = Vec::with_capacity(paths.len());
+        for handle in handles {
+            let partial = handle
+                .join()
+                .map_err(|_| "缺失字段扫描 worker 异常终止".to_string())?;
+            indexed.extend(partial);
+        }
+        indexed.sort_by_key(|item| item.0);
+        Ok(indexed.into_iter().map(|(_, outcome)| outcome).collect())
+    })
 }
 
 fn scan_file(path: &Path, selected: &[MissingField]) -> Result<Option<MissingSong>, String> {

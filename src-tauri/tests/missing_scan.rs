@@ -6,7 +6,10 @@ mod common;
 
 use app_lib::commands::missing::scan_missing as scan_missing_command;
 use app_lib::model::{MissingField, MissingScanResult};
-use app_lib::service::missing::scan_missing;
+use app_lib::service::missing::{
+    missing_scan_worker_count, scan_missing, scan_missing_with_workers,
+    MAX_MISSING_SCAN_WORKERS,
+};
 use app_lib::service::reader::read_song_meta;
 use common::{
     add_tags, tiny_png_bytes, write_riff_info_only_wav, write_tagged_flac, write_tagged_mp3,
@@ -447,5 +450,98 @@ fn command_runs_scan_in_blocking_worker_and_preserves_service_errors() {
     assert!(
         missing_dir.is_err(),
         "目录级错误应作为 command-level Err 返回"
+    );
+}
+
+#[test]
+fn worker_count_is_capped_by_workers_files_and_cpu() {
+    for file_count in [0, 1, 2, 3, 4, 5, 16, 1024, usize::MAX] {
+        let workers = missing_scan_worker_count(file_count);
+        assert!(
+            workers <= MAX_MISSING_SCAN_WORKERS,
+            "worker 数 {workers} 超过固定上限（file_count={file_count}）"
+        );
+        assert!(
+            workers <= file_count,
+            "worker 数 {workers} 超过待扫描文件数 {file_count}"
+        );
+    }
+
+    // 小目录绝不建线程；大目录最多取「CPU 可用并行度」与固定上限的较小值。
+    assert_eq!(missing_scan_worker_count(0), 0);
+    assert_eq!(missing_scan_worker_count(1), 1);
+    let available = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1);
+    assert_eq!(
+        missing_scan_worker_count(usize::MAX),
+        available.min(MAX_MISSING_SCAN_WORKERS)
+    );
+}
+
+#[test]
+fn empty_dir_and_empty_checks_never_spawn_workers() {
+    let tmp = TempDir::new().unwrap();
+    let empty = MissingScanResult {
+        songs: vec![],
+        errors: vec![],
+    };
+    assert_eq!(
+        scan_missing_with_workers(tmp.path(), &[MissingField::Title], Some(4)).unwrap(),
+        empty
+    );
+
+    // checks 为空时早返回，即使显式要求并行也不会建线程。
+    write_tagged_flac(tmp.path(), "song.flac", "", "Artist");
+    assert_eq!(
+        scan_missing_with_workers(tmp.path(), &[], Some(4)).unwrap(),
+        empty
+    );
+}
+
+#[test]
+fn forced_parallel_scan_matches_serial_results_and_stays_read_only() {
+    let tmp = TempDir::new().unwrap();
+    for index in 0..12 {
+        let (title, artist) = match index % 4 {
+            0 => ("Title", "Artist"),
+            1 => ("", "Artist"),
+            2 => ("Title", ""),
+            _ => ("", ""),
+        };
+        write_tagged_flac(
+            tmp.path(),
+            &format!("song-{index:02}.flac"),
+            title,
+            artist,
+        );
+    }
+    fs::write(tmp.path().join("broken-13.mp3"), b"not an mp3").unwrap();
+    let watched = tmp.path().join("song-03.flac");
+    let bytes_before = fs::read(&watched).unwrap();
+
+    // 12 首里 3 首完整、9 首命中；坏文件只进 errors，不影响其余文件。
+    let checks = [MissingField::Title, MissingField::Artist];
+    let serial = scan_missing_with_workers(tmp.path(), &checks, Some(1)).unwrap();
+    let parallel = scan_missing_with_workers(tmp.path(), &checks, Some(4)).unwrap();
+    let replay = scan_missing_with_workers(tmp.path(), &checks, Some(3)).unwrap();
+    let capped = scan_missing_with_workers(tmp.path(), &checks, Some(100)).unwrap();
+    let adaptive = scan_missing(tmp.path(), &checks).unwrap();
+
+    assert_eq!(serial.songs.len(), 9, "应有 9 首命中缺歌名/缺歌手");
+    assert_eq!(serial.errors.len(), 1);
+    assert!(serial.errors[0].path.ends_with("broken-13.mp3"));
+    assert!(serial.errors.iter().all(|error| !error.reason.is_empty()));
+
+    for other in [&parallel, &replay, &capped, &adaptive] {
+        assert_eq!(
+            &serial, other,
+            "并行与串行结果（含 songs/errors 顺序）必须完全一致"
+        );
+    }
+    assert_eq!(
+        fs::read(&watched).unwrap(),
+        bytes_before,
+        "并行查漏扫描不得写回标签"
     );
 }
